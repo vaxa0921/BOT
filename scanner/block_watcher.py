@@ -1,0 +1,271 @@
+"""Block watcher for new contract deployments."""
+import time
+import logging
+import asyncio
+from typing import Optional, List, Any
+from web3 import Web3, AsyncWeb3
+try:
+    from web3.providers.async_rpc import AsyncHTTPProvider, AsyncWebsocketProvider
+except Exception:
+    from web3.providers.async_rpc import AsyncHTTPProvider
+    AsyncWebsocketProvider = None
+from scanner.contract_queue import enqueue, enqueue_priority
+from scanner.config import RPCS, RPCS_WS, USE_WS, MAX_LOG_RANGE_BLOCKS, BLOCK_LAG as CONFIG_BLOCK_LAG, LARGE_TRANSFER_THRESHOLD_WEI
+from scanner.watchlist_manager import load_watchlist
+from scanner.worker import process_contract
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [WATCHER] %(message)s"
+)
+
+BLOCK_LAG: int = CONFIG_BLOCK_LAG
+POLL_INTERVAL: int = 0.5
+BLOCK_BATCH_SIZE: int = min(3, MAX_LOG_RANGE_BLOCKS)  # Fetch multiple blocks at once
+
+logger = logging.getLogger(__name__)
+
+
+def watch(w3: Web3) -> None:
+    """
+    Watch for new contract deployments and enqueue them.
+    Uses async implementation for faster block fetching.
+    
+    Args:
+        w3: Web3 instance (sync, used for initial setup/compat)
+    """
+    logger.info("Watcher started (Async Optimized)")
+    
+    try:
+        asyncio.run(_watch_async())
+    except Exception as e:
+        logger.error(f"Async watcher failed: {e}. Falling back to sync.")
+        _watch_sync(w3)
+
+
+async def _watch_async() -> None:
+    """Async implementation of block watcher."""
+    # Initialize async web3
+    provider = AsyncWebsocketProvider(RPCS_WS[0]) if (USE_WS and RPCS_WS and AsyncWebsocketProvider) else AsyncHTTPProvider(RPCS[0])
+    async_w3 = AsyncWeb3(provider)
+    if not await async_w3.is_connected():
+        raise ConnectionError("Cannot connect to async RPC")
+        
+    last_block = await async_w3.eth.block_number
+    pending_seen: set[str] = set()
+    pair_topic = Web3.keccak(text="PairCreated(address,address,address,uint256)").hex()
+    pool_topic = Web3.keccak(text="PoolCreated(address,address,uint24,int24,address)").hex()
+    mint_topic = Web3.keccak(text="Transfer(address,address,uint256)").hex()
+    zero_topic = "0x0000000000000000000000000000000000000000000000000000000000000000"
+    
+    # Cache watchlist
+    watchlist_addrs = set()
+    last_wl_update = 0
+    
+    while True:
+        # Update watchlist cache
+        now_ts = time.time()
+        if now_ts - last_wl_update > 10:
+            try:
+                wl = load_watchlist()
+                watchlist_addrs = {w["address"].lower() for w in wl}
+                last_wl_update = now_ts
+            except Exception:
+                pass
+
+        try:
+            # Fast path: poll pending block frequently to catch deployments early
+            try:
+                pending_block = await async_w3.eth.get_block("pending", full_transactions=True)
+                if pending_block and getattr(pending_block, "transactions", None):
+                    for tx in pending_block.transactions:
+                        if tx.to is None:
+                            # Try to fetch receipt; if not yet mined, skip
+                            try:
+                                rec = await async_w3.eth.get_transaction_receipt(tx.hash)
+                                if rec and rec.contractAddress and rec.contractAddress not in pending_seen:
+                                    pending_seen.add(rec.contractAddress)
+                                    enqueue(rec.contractAddress)
+                                    logger.info(f"[PENDING] New contract (mined): {rec.contractAddress}")
+                            except Exception:
+                                # Not mined yet; will be caught in newHeads path below
+                                pass
+            except Exception as e:
+                logger.debug(f"Pending block poll error: {e}")
+
+            current = await async_w3.eth.block_number
+            
+            if current <= last_block + BLOCK_LAG:
+                await asyncio.sleep(POLL_INTERVAL)
+                continue
+            
+            # Calculate range to fetch
+            start_block = last_block + 1
+            # Ensure we never exceed provider getLogs range limits
+            max_range = max(int(MAX_LOG_RANGE_BLOCKS), 1)
+            end_block = min(current - BLOCK_LAG, start_block + min(BLOCK_BATCH_SIZE, max_range) - 1)
+            
+            if start_block > end_block:
+                continue
+
+            # Fetch blocks concurrently
+            tasks = []
+            for b in range(start_block, end_block + 1):
+                tasks.append(async_w3.eth.get_block(b, full_transactions=True))
+            
+            blocks = await asyncio.gather(*tasks, return_exceptions=True)
+            
+            # Poll logs for PairCreated/PoolCreated/Transfer(Mint) in the same range
+            try:
+                logs = await async_w3.eth.get_logs({
+                    "fromBlock": start_block,
+                    "toBlock": end_block,
+                    "topics": [[pair_topic, pool_topic, mint_topic]]
+                })
+                for log in logs:
+                    addr_fields = []
+                    
+                    # Mint detection: Transfer(from=0, to=X, val)
+                    try:
+                        topics = log.get("topics", [])
+                        if len(topics) > 0 and topics[0].hex() == mint_topic:
+                            # topic1 is from, topic2 is to
+                            if len(topics) > 2:
+                                receiver = Web3.to_checksum_address("0x" + topics[2].hex()[-40:])
+                                
+                                # Check Watchlist Sniper
+                                if receiver.lower() in watchlist_addrs:
+                                    logger.warning(f"[SNIPER] Watchlist target {receiver} received funds! Triggering exploit...")
+                                    try:
+                                        loop = asyncio.get_running_loop()
+                                        loop.run_in_executor(None, process_contract, Web3(Web3.HTTPProvider(RPCS[0])), receiver)
+                                    except Exception as e:
+                                        logger.error(f"[SNIPER] Failed to trigger worker: {e}")
+
+                                # Check for Mint (from=0)
+                                if topics[1].hex() == zero_topic:
+                                    enqueue_priority(receiver)
+                                    # logger.info(f"[MINT] Mint detected to {receiver}")
+                                    continue
+                                
+                                # Check for Large Transfer
+                                data_hex = log.get("data", "0x")
+                                if data_hex and data_hex != "0x":
+                                    try:
+                                        val = int(data_hex, 16)
+                                        if val >= LARGE_TRANSFER_THRESHOLD_WEI:
+                                            receiver = Web3.to_checksum_address("0x" + topics[2].hex()[-40:])
+                                            enqueue_priority(receiver)
+                                            # logger.info(f"[TRANSFER] Large transfer to {receiver}")
+                                            continue
+                                    except Exception:
+                                        pass
+
+                            continue # Skip standard pair logic for mints/transfers
+                    except Exception:
+                        pass
+
+                    try:
+                        if "address" in log and log["address"]:
+                            addr_fields.append(log["address"])
+                    except Exception:
+                        pass
+                    for a in addr_fields:
+                        try:
+                            enqueue(Web3.to_checksum_address(a))
+                        except Exception:
+                            continue
+                    logger.info(f"[FACTORY] Pair/Pool/Mint event detected in blocks {start_block}-{end_block}")
+            except Exception as e:
+                logger.debug(f"Log poll error: {e}")
+            
+            for block in blocks:
+                if isinstance(block, Exception):
+                    logger.error(f"Error fetching block: {block}")
+                    continue
+                
+                if not block:
+                    continue
+
+                # Process transactions
+                # Optimization: Check if 'to' is None (contract creation)
+                # This is much faster than getting receipt for every tx
+                
+                # Note: Internal transactions (factory deployments) are missed here.
+                # To catch factory deployments, we would need trace_block (expensive/unavailable on public RPCs)
+                # or filter logs for 'ContractCreated' events if emitted by factories.
+                
+                # For standard deployments:
+                for tx in block.transactions:
+                    if tx.to is None:
+                        # Fetch receipt to get address
+                        # We do this individually or could batch if needed
+                        try:
+                            receipt = await async_w3.eth.get_transaction_receipt(tx.hash)
+                            if receipt.contractAddress:
+                                enqueue(receipt.contractAddress)
+                                logger.info(f"Found new contract: {receipt.contractAddress}")
+                        except Exception as e:
+                            logger.error(f"Error fetching receipt: {e}")
+
+            last_block = end_block
+            
+        except Exception as e:
+            logger.error(f"Async watcher error: {e}")
+            await asyncio.sleep(5)
+
+
+def _watch_sync(w3: Web3) -> None:
+    """
+    Legacy synchronous watcher (fallback).
+    """
+    try:
+        last_block: int = w3.eth.block_number
+    except Exception:
+        try:
+            from scanner.config import RPCS
+            w3 = Web3(Web3.HTTPProvider(RPCS[0]))
+            last_block = w3.eth.block_number
+        except Exception:
+            time.sleep(5)
+            return
+
+    while True:
+        try:
+            current: int = w3.eth.block_number
+
+            if current <= last_block + BLOCK_LAG:
+                time.sleep(POLL_INTERVAL)
+                continue
+
+            for block_num in range(last_block + 1, current - BLOCK_LAG + 1):
+                block = w3.eth.get_block(block_num, full_transactions=True)
+
+                for tx in block.transactions:
+                    # контракт створюється ТІЛЬКИ якщо to == None
+                    if tx.to is not None:
+                        continue
+
+                    receipt = w3.eth.get_transaction_receipt(tx.hash)
+                    addr: Optional[str] = receipt.contractAddress
+
+                    if addr:
+                        enqueue(addr)
+
+            last_block = current
+
+        except Exception as e:
+            logger.error(f"Watcher error {e}")
+            try:
+                from scanner.config import RPCS
+                # rotate RPCs on error
+                for endpoint in RPCS:
+                    try:
+                        w3 = Web3(Web3.HTTPProvider(endpoint))
+                        _ = w3.eth.block_number
+                        break
+                    except Exception:
+                        continue
+            except Exception:
+                pass
+            time.sleep(5)
