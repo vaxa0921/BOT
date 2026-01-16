@@ -47,7 +47,6 @@ from scanner.detectors import (
     detect_l1_l2_alias
 )
 from scanner.context_leak_detector import detect_multicall_context_leak
-from scanner.simulation import run_honeypot_simulation
 from scanner.watchlist_manager import add_to_watchlist
 from scanner.exploit_executor import execute_cautious_exploit
 
