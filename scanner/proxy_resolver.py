@@ -1,9 +1,8 @@
 """Proxy to implementation resolver."""
-from typing import Optional, Dict, Any
+from typing import Optional, Dict
 from web3 import Web3
-import time
 
-_IMPL_CACHE: Dict[str, Any] = {}
+_IMPL_CACHE: Dict[str, Optional[str]] = {}
 
 
 def get_implementation_address(
@@ -23,12 +22,9 @@ def get_implementation_address(
         Implementation address or None
     """
     key = f"{proxy_type}:{proxy_address.lower()}"
-    now = time.time()
     cached = _IMPL_CACHE.get(key)
     if cached is not None:
-        impl_cached, ts_cached = cached
-        if now - ts_cached < 3600:
-            return impl_cached
+        return cached
 
     try:
         if proxy_type == "eip1967":
@@ -40,7 +36,7 @@ def get_implementation_address(
             if impl_bytes and impl_bytes != b"\x00" * 32:
                 impl_address = "0x" + impl_bytes[-20:].hex()
                 impl = Web3.to_checksum_address(impl_address)
-                _IMPL_CACHE[key] = (impl, now)
+                _IMPL_CACHE[key] = impl
                 return impl
         
         elif proxy_type == "eip1822":
@@ -50,7 +46,7 @@ def get_implementation_address(
             if impl_bytes and impl_bytes != b"\x00" * 32:
                 impl_address = "0x" + impl_bytes[-20:].hex()
                 impl = Web3.to_checksum_address(impl_address)
-                _IMPL_CACHE[key] = (impl, now)
+                _IMPL_CACHE[key] = impl
                 return impl
         
         elif proxy_type == "minimal":
@@ -60,7 +56,7 @@ def get_implementation_address(
                 # Implementation address is typically at position 10-29
                 impl_address = "0x" + code[10:50]
                 impl = Web3.to_checksum_address(impl_address)
-                _IMPL_CACHE[key] = (impl, now)
+                _IMPL_CACHE[key] = impl
                 return impl
         
         # Try to call implementation() function
@@ -69,7 +65,7 @@ def get_implementation_address(
             contract = w3.eth.contract(address=proxy_address, abi=abi)
             impl = contract.functions.implementation().call()
             if impl:
-                _IMPL_CACHE[key] = (impl, now)
+                _IMPL_CACHE[key] = impl
             return impl
         except Exception:
             pass
@@ -77,7 +73,7 @@ def get_implementation_address(
     except Exception:
         pass
     
-    _IMPL_CACHE[key] = (None, now)
+    _IMPL_CACHE[key] = None
     return None
 
 

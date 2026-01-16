@@ -230,15 +230,6 @@ def process_contract(w3: Web3, addr: str) -> None:
                     print(f"[FOUND] Uninitialized Reward vulnerability in {addr}! Details: {uninit_reward.get('details')}", flush=True)
                     execute_cautious_exploit(w3, addr, "uninitialized_reward", uninit_reward)
 
-                seq_fee = detect_sequencer_fee_manipulation(w3, addr)
-                if seq_fee.get("vulnerable"):
-                    findings.append({
-                        "type": "sequencer_fee",
-                        "data": seq_fee
-                    })
-                    print(f"[FOUND] Sequencer Fee Manipulation vulnerability in {addr}! Details: {seq_fee.get('details')}", flush=True)
-                    execute_cautious_exploit(w3, addr, "sequencer_fee", seq_fee)
-
                 self_destruct = detect_self_destruct_reincarnation(w3, addr)
                 if self_destruct.get("vulnerable"):
                     findings.append({

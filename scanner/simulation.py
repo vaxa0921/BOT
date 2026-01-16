@@ -580,22 +580,63 @@ def run_honeypot_simulation_token(victim_address: str, token_address: str, rpc_u
     last_result: Dict[str, Any] = {}
 
     for endpoint in endpoints:
-        test_content = generate_honeypot_test_token(victim_address, token_address, endpoint, weth_address, router_address, sd_selectors, bug_type)
-        result = _run_forge_test(victim_address, test_content)
-        last_result = result
-        combined = f"{result.get('error') or ''}\n{result.get('output') or ''}"
-        if "429" in combined or "Too Many Requests" in combined:
-            logger.warning(f"RPC 429 detected during token simulation on {endpoint}, backing off for {backoff} seconds")
-            time.sleep(backoff)
-            backoff = min(backoff * 2, 30.0)
-            continue
-        if bug_type == "vault_rounding_dust" and result.get("safe") and result.get("simulated_profit", 0) == 0:
+        base_content = generate_honeypot_test_token(victim_address, token_address, endpoint, weth_address, router_address, sd_selectors, bug_type)
+        scenarios: List[Dict[str, Any]] = []
+
+        if bug_type == "vault_rounding_dust":
+            scenarios.append({
+                "label": "10_eth",
+                "content": base_content
+            })
+            scenarios.append({
+                "label": "1_wei",
+                "content": base_content.replace("uint256 startEth = 10 ether;", "uint256 startEth = 1 wei;")
+            })
+            scenarios.append({
+                "label": "100_eth",
+                "content": base_content.replace("uint256 startEth = 10 ether;", "uint256 startEth = 100 ether;")
+            })
+        else:
+            scenarios.append({
+                "label": "default",
+                "content": base_content
+            })
+
+        best_result: Dict[str, Any] = {}
+        zero_profit_safe = False
+
+        for scenario in scenarios:
+            test_content = scenario["content"]
+            result = _run_forge_test(victim_address, test_content)
+            last_result = result
+            if not best_result or result.get("simulated_profit", 0) > best_result.get("simulated_profit", 0):
+                best_result = result
+
+            combined = f"{result.get('error') or ''}\n{result.get('output') or ''}"
+            if "429" in combined or "Too Many Requests" in combined:
+                logger.warning(f"RPC 429 detected during token simulation on {endpoint}, backing off for {backoff} seconds")
+                time.sleep(backoff)
+                backoff = min(backoff * 2, 30.0)
+                break
+
+            if bug_type == "vault_rounding_dust":
+                profit = result.get("simulated_profit", 0)
+                if scenario["label"] == "10_eth" and result.get("safe") and profit == 0:
+                    zero_profit_safe = True
+                logger.info(f"[ROUNDING_SIM] Scenario {scenario['label']} profit: {profit}")
+
+            if result.get("simulated_profit", 0) > 0:
+                return result
+
+        if bug_type == "vault_rounding_dust" and zero_profit_safe:
             logger.info("[INFO] Vault secure against simple 10 ETH inflation")
             try:
                 print("[INFO] Vault secure against simple 10 ETH inflation", flush=True)
             except Exception:
                 pass
-        return result
+
+        if best_result:
+            return best_result
 
     if bug_type == "vault_rounding_dust" and last_result.get("safe") and last_result.get("simulated_profit", 0) == 0:
         logger.info("[INFO] Vault secure against simple 10 ETH inflation")
