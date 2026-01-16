@@ -53,7 +53,7 @@ contract HoneypotTestToken is Test {
         vm.label(victim, "Victim");
         vm.label(token, "Token");
         vm.label(attacker, "Attacker");
-        vm.txGasLimit(10000000); // Base network high gas limit
+        vm.gasLimit(10000000);
     }
 
     function testSafeCycleToken() public {
@@ -264,7 +264,7 @@ contract HoneypotTestETH is Test {
         vm.createSelectFork("<RPC_URL>");
         vm.label(victim, "Victim");
         vm.label(attacker, "Attacker");
-        vm.txGasLimit(10000000); // Base network high gas limit
+        vm.gasLimit(10000000);
     }
 
     function testSafeCycleETH() public {
