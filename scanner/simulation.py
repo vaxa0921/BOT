@@ -25,9 +25,26 @@ interface IVault {
     function asset() external view returns (address);
 }
 
-contract HoneypotTest is Test {
+// Minimal Router interface for Swaps
+interface IRouter {
+    struct ExactInputSingleParams {
+        address tokenIn;
+        address tokenOut;
+        uint24 fee;
+        address recipient;
+        uint256 deadline;
+        uint256 amountIn;
+        uint256 amountOutMinimum;
+        uint160 sqrtPriceLimitX96;
+    }
+    function exactInputSingle(ExactInputSingleParams calldata params) external payable returns (uint256 amountOut);
+}
+
+contract HoneypotTestToken is Test {
     address victim = <VICTIM_ADDRESS>;
     address token = <TOKEN_ADDRESS>;
+    address weth = <WETH_ADDRESS>; 
+    address router = <ROUTER_ADDRESS>;
     address attacker = address(0x1337);
     
     function setUp() public {
@@ -37,62 +54,188 @@ contract HoneypotTest is Test {
         vm.label(attacker, "Attacker");
     }
 
-    function testSafeCycle() public {
+    function testSafeCycleToken() public {
         vm.startPrank(attacker);
         
-        // 1. Simulate BUY (Deal tokens)
-        uint256 amount = 1 ether; // 1 token (assumed 18 decimals, adjust if needed)
-        deal(token, attacker, amount);
+        // 1. Start with ETH (0.0001 ETH)
+        uint256 startEth = 0.0001 ether;
+        vm.deal(attacker, startEth * 2); // buffer for gas
         
-        uint256 balBefore = IERC20(token).balanceOf(attacker);
-        require(balBefore == amount, "Deal failed");
+        uint256 ethBalBefore = attacker.balance;
 
-        // 2. Approve & Deposit
-        IERC20(token).approve(victim, amount);
+        // 2. Swap ETH -> Token
+        // We assume WETH/Token pool exists. 
+        // If not, this might fail, but that's a good filter.
+        // We'll try 0.3% fee tier (3000) common for V3.
         
-        // Try deposit (handle generic vault interface or low-level call)
-        // Assuming ERC4626-like for now, but fallback to raw call if needed
-        (bool success, bytes memory data) = victim.call(
-            abi.encodeWithSignature("deposit(uint256,address)", amount, attacker)
-        );
+        uint256 tokenAmount = 0;
+        if (token != weth) {
+            // Approve router to spend WETH if we were wrapping, but here we send ETH value
+            // Actually V3 router 'exactInputSingle' with value expects WETH if tokenIn is WETH?
+            // Usually we wrap first or use multicall. 
+            // For simplicity in simulation: DEAL tokens directly to simulate the "Swap Success" state,
+            // then subtract the ETH cost from profit calculation to simulate the swap cost.
+            // OR try to actually swap. 
+            // Let's try to actually swap to prove liquidity exists!
+            
+            // Wrap ETH
+            (bool s, ) = weth.call{value: startEth}("");
+            require(s, "Wrap failed");
+            IERC20(weth).approve(router, startEth);
+            
+            try IRouter(router).exactInputSingle(IRouter.ExactInputSingleParams({
+                tokenIn: weth,
+                tokenOut: token,
+                fee: 3000,
+                recipient: attacker,
+                deadline: block.timestamp,
+                amountIn: startEth,
+                amountOutMinimum: 0,
+                sqrtPriceLimitX96: 0
+            })) returns (uint256 amountOut) {
+                tokenAmount = amountOut;
+                console.log("[SIM] Success using WETH swap. Got tokens:", tokenAmount);
+            } catch {
+                // Try 500 fee tier
+                try IRouter(router).exactInputSingle(IRouter.ExactInputSingleParams({
+                    tokenIn: weth,
+                    tokenOut: token,
+                    fee: 500,
+                    recipient: attacker,
+                    deadline: block.timestamp,
+                    amountIn: startEth,
+                    amountOutMinimum: 0,
+                    sqrtPriceLimitX96: 0
+                })) returns (uint256 amountOut) {
+                    tokenAmount = amountOut;
+                    console.log("[SIM] Success using WETH swap (fee 500). Got tokens:", tokenAmount);
+                } catch {
+                     // Try 10000 fee tier
+                    try IRouter(router).exactInputSingle(IRouter.ExactInputSingleParams({
+                        tokenIn: weth,
+                        tokenOut: token,
+                        fee: 10000,
+                        recipient: attacker,
+                        deadline: block.timestamp,
+                        amountIn: startEth,
+                        amountOutMinimum: 0,
+                        sqrtPriceLimitX96: 0
+                    })) returns (uint256 amountOut) {
+                        tokenAmount = amountOut;
+                        console.log("[SIM] Success using WETH swap (fee 10000). Got tokens:", tokenAmount);
+                    } catch {
+                        console.log("[FAIL: No liquidity]");
+                        revert("Swap ETH->Token failed");
+                    }
+                }
+            }
+        } else {
+            // Token IS WETH
+            (bool s, ) = weth.call{value: startEth}("");
+            require(s, "Wrap failed");
+            tokenAmount = startEth;
+        }
+
+        // 3. Approve & Deposit
+        IERC20(token).approve(victim, tokenAmount);
         
-        if (!success) {
-             // Try simplified deposit(uint256)
-            (success, ) = victim.call(
-                abi.encodeWithSignature("deposit(uint256)", amount)
-            );
+        bool success;
+        
+        // Try multiple deposit selectors
+        // deposit(uint256)
+        (success, ) = victim.call(abi.encodeWithSignature("deposit(uint256)", tokenAmount));
+        if (!success) (success, ) = victim.call(abi.encodeWithSignature("deposit(uint256,address)", tokenAmount, attacker));
+        if (!success) (success, ) = victim.call(abi.encodeWithSignature("mint(uint256)", tokenAmount));
+        if (!success) (success, ) = victim.call(abi.encodeWithSignature("stake(uint256)", tokenAmount));
+        if (!success) (success, ) = victim.call(abi.encodeWithSignature("contribute(uint256)", tokenAmount));
+        
+        require(success, "Deposit failed (tried all variants)");
+
+        // 4. Withdraw
+        // Try multiple withdraw selectors
+        (success, ) = victim.call(abi.encodeWithSignature("withdraw(uint256)", tokenAmount));
+        if (!success) (success, ) = victim.call(abi.encodeWithSignature("withdraw(uint256,address,address)", tokenAmount, attacker, attacker));
+        if (!success) (success, ) = victim.call(abi.encodeWithSignature("redeem(uint256)", tokenAmount));
+        if (!success) (success, ) = victim.call(abi.encodeWithSignature("withdraw()"));
+        if (!success) (success, ) = victim.call(abi.encodeWithSignature("withdrawAll()"));
+        if (!success) (success, ) = victim.call(abi.encodeWithSignature("leave(uint256)", tokenAmount));
+        
+        require(success, "Withdraw failed");
+
+        // 5. Swap Token -> ETH
+        uint256 tokenBal = IERC20(token).balanceOf(attacker);
+        require(tokenBal > 0, "No tokens returned");
+        
+        if (token != weth) {
+             IERC20(token).approve(router, tokenBal);
+             // Swap back
+             try IRouter(router).exactInputSingle(IRouter.ExactInputSingleParams({
+                tokenIn: token,
+                tokenOut: weth,
+                fee: 3000, // Try 3000 first
+                recipient: attacker,
+                deadline: block.timestamp,
+                amountIn: tokenBal,
+                amountOutMinimum: 0,
+                sqrtPriceLimitX96: 0
+            })) returns (uint256 amountOut) {
+                // Unwrap WETH
+                 IERC20(weth).transfer(address(0), 0); // dummy
+                 // Actually need to unwrap weth
+                 // WETH withdraw is withdraw(uint)
+                 (bool s, ) = weth.call(abi.encodeWithSignature("withdraw(uint256)", amountOut));
+                 require(s, "Unwrap failed");
+            } catch {
+                // Try 500
+                 try IRouter(router).exactInputSingle(IRouter.ExactInputSingleParams({
+                    tokenIn: token,
+                    tokenOut: weth,
+                    fee: 500,
+                    recipient: attacker,
+                    deadline: block.timestamp,
+                    amountIn: tokenBal,
+                    amountOutMinimum: 0,
+                    sqrtPriceLimitX96: 0
+                })) returns (uint256 amountOut) {
+                    (bool s, ) = weth.call(abi.encodeWithSignature("withdraw(uint256)", amountOut));
+                    require(s, "Unwrap failed");
+                } catch {
+                    // Try 10000
+                     try IRouter(router).exactInputSingle(IRouter.ExactInputSingleParams({
+                        tokenIn: token,
+                        tokenOut: weth,
+                        fee: 10000,
+                        recipient: attacker,
+                        deadline: block.timestamp,
+                        amountIn: tokenBal,
+                        amountOutMinimum: 0,
+                        sqrtPriceLimitX96: 0
+                    })) returns (uint256 amountOut) {
+                        (bool s, ) = weth.call(abi.encodeWithSignature("withdraw(uint256)", amountOut));
+                        require(s, "Unwrap failed");
+                    } catch {
+                         revert("Swap Token->ETH failed");
+                    }
+                }
+            }
+        } else {
+            // Token is WETH, just unwrap
+            (bool s, ) = weth.call(abi.encodeWithSignature("withdraw(uint256)", tokenBal));
+            require(s, "Unwrap failed");
+        }
+
+        uint256 ethBalAfter = attacker.balance;
+        int256 profit = int256(ethBalAfter) - int256(ethBalBefore);
+        
+        if (profit > 0) {
+            console.log("PROFIT_WEI:", uint256(profit));
+            console.log("[SIM] Profit found:", uint256(profit), "wei");
+        } else {
+             console.log("PROFIT_WEI: -", uint256(-profit));
         }
         
-        require(success, "Deposit failed");
-        
-        // 3. Withdraw
-        // Check balance of shares/receipts if possible, but blindly try withdraw all
-        // (Assuming 1:1 for simplicity or just trying to get *something* back)
-        
-        // Try withdraw(uint256,address,address)
-        (success, ) = victim.call(
-            abi.encodeWithSignature("withdraw(uint256,address,address)", amount, attacker, attacker)
-        );
-        
-        if (!success) {
-             // Try withdraw(uint256)
-            (success, ) = victim.call(
-                abi.encodeWithSignature("withdraw(uint256)", amount)
-            );
-        }
-
-        // Note: Withdraw might fail if we didn't get shares, or logic is complex.
-        // For Honeypot check, the CRITICAL part is checking if we *could* sell the token 
-        // if we actually got it back. So let's test transferability of the token itself.
-        
-        // 4. Simulate SELL (Transfer to another address)
-        // We simulate this by transferring whatever we have (even if 0, we deal again to test transfer mechanism)
-        deal(token, attacker, amount); // Refill to test transfer logic specifically
-        
-        address receiver = address(0xDEAD);
-        bool transferSuccess = IERC20(token).transfer(receiver, amount);
-        require(transferSuccess, "Sell/Transfer failed (Honeypot?)");
-        
+        // We consider it "Safe" if we got here (swapped in, deposited, withdrawn, swapped out)
+        console.log("SUCCESS_METHOD: token_swap_flow");
         vm.stopPrank();
     }
 }
@@ -127,71 +270,41 @@ contract HoneypotTestETH is Test {
         bool success;
         
         // Try deposit() first
-        (success, ) = victim.call{value: amount}(
-            abi.encodeWithSignature("deposit()")
-        );
+        (success, ) = victim.call{value: amount}(abi.encodeWithSignature("deposit()"));
         
-        if (!success) {
-            // Try raw send (fallback)
-            (success, ) = victim.call{value: amount}("");
-        }
+        // Flexible entry: Try alternative selectors if standard deposit fails
+        if (!success) (success, ) = victim.call{value: amount}(""); // Raw send
+        if (!success) (success, ) = victim.call{value: amount}(abi.encodeWithSignature("stake()"));
+        if (!success) (success, ) = victim.call{value: amount}(abi.encodeWithSignature("contribute()"));
+        if (!success) (success, ) = victim.call{value: amount}(abi.encodeWithSignature("enter()"));
         
-        require(success, "Deposit failed (both deposit() and raw send)");
+        require(success, "Deposit failed (tried all variants)");
         
         // 2. Withdraw
         // Priority: withdraw(uint256) -> withdraw() -> withdrawAll() -> redeem(uint256)
         
         // Try withdraw(uint256)
-        (success, ) = victim.call(
-            abi.encodeWithSignature("withdraw(uint256)", amount)
-        );
-        if (success) {
-            _checkProfit(balBefore, "withdraw(uint256)");
-            vm.stopPrank();
-            return;
-        }
+        (success, ) = victim.call(abi.encodeWithSignature("withdraw(uint256)", amount));
+        if (success) { _checkProfit(balBefore, "withdraw(uint256)"); vm.stopPrank(); return; }
         
         // Try withdraw() - no args
-        (success, ) = victim.call(
-            abi.encodeWithSignature("withdraw()")
-        );
-        if (success) {
-            _checkProfit(balBefore, "withdraw()");
-            vm.stopPrank();
-            return;
-        }
+        (success, ) = victim.call(abi.encodeWithSignature("withdraw()"));
+        if (success) { _checkProfit(balBefore, "withdraw()"); vm.stopPrank(); return; }
 
         // Try withdrawAll()
-        (success, ) = victim.call(
-            abi.encodeWithSignature("withdrawAll()")
-        );
-        if (success) {
-            _checkProfit(balBefore, "withdrawAll()");
-            vm.stopPrank();
-            return;
-        }
+        (success, ) = victim.call(abi.encodeWithSignature("withdrawAll()"));
+        if (success) { _checkProfit(balBefore, "withdrawAll()"); vm.stopPrank(); return; }
 
         // Try redeem(uint256) - ERC4626 standard
-        (success, ) = victim.call(
-            abi.encodeWithSignature("redeem(uint256,address,address)", amount, attacker, attacker)
-        );
-        if (!success) {
-             (success, ) = victim.call(
-                abi.encodeWithSignature("redeem(uint256)", amount)
-            );
-        }
-        if (success) {
-            _checkProfit(balBefore, "redeem(uint256)");
-            vm.stopPrank();
-            return;
-        }
+        (success, ) = victim.call(abi.encodeWithSignature("redeem(uint256,address,address)", amount, attacker, attacker));
+        if (!success) (success, ) = victim.call(abi.encodeWithSignature("redeem(uint256)", amount));
+        if (success) { _checkProfit(balBefore, "redeem(uint256)"); vm.stopPrank(); return; }
 
-        // If standard withdraws fail, check if we got ETH back via internal logic 
-        if (!success) {
-             // Check if attacker balance increased back
-             // (Not implemented for simplicity, relying on explicit calls for now)
-        }
-        
+        // Try leave() / exit()
+        (success, ) = victim.call(abi.encodeWithSignature("leave(uint256)", amount));
+        if (!success) (success, ) = victim.call(abi.encodeWithSignature("exit()"));
+        if (success) { _checkProfit(balBefore, "exit/leave"); vm.stopPrank(); return; }
+
         require(success, "Withdraw failed (tried all variants)");
         
         vm.stopPrank();
@@ -203,6 +316,7 @@ contract HoneypotTestETH is Test {
         console.log("SUCCESS_METHOD:", method);
         if (profit >= 0) {
             console.log("PROFIT_WEI:", uint256(profit));
+            console.log("[SIM] Profit found:", uint256(profit), "wei");
         } else {
             console.log("PROFIT_WEI: -", uint256(-profit));
         }
@@ -210,10 +324,12 @@ contract HoneypotTestETH is Test {
 }
 """
 
-def generate_honeypot_test(victim_address: str, token_address: str, rpc_url: str) -> str:
+def generate_honeypot_test_token(victim_address: str, token_address: str, rpc_url: str, weth_address: str, router_address: str) -> str:
     content = HONEYPOT_TEST_TEMPLATE.replace("<VICTIM_ADDRESS>", victim_address)
     content = content.replace("<TOKEN_ADDRESS>", token_address)
     content = content.replace("<RPC_URL>", rpc_url)
+    content = content.replace("<WETH_ADDRESS>", weth_address)
+    content = content.replace("<ROUTER_ADDRESS>", router_address)
     return content
 
 def generate_honeypot_test_eth(victim_address: str, rpc_url: str) -> str:
@@ -221,11 +337,11 @@ def generate_honeypot_test_eth(victim_address: str, rpc_url: str) -> str:
     content = content.replace("<RPC_URL>", rpc_url)
     return content
 
-def run_honeypot_simulation(victim_address: str, token_address: str, rpc_url: str) -> Dict[str, Any]:
+def run_honeypot_simulation_token(victim_address: str, token_address: str, rpc_url: str, weth_address: str, router_address: str) -> Dict[str, Any]:
     """
-    Run a forge test to simulate the Buy->Deposit->Withdraw->Sell cycle (ERC20).
+    Run a forge test to simulate the ETH -> Swap -> Deposit -> Withdraw -> Swap -> ETH cycle.
     """
-    test_content = generate_honeypot_test(victim_address, token_address, rpc_url)
+    test_content = generate_honeypot_test_token(victim_address, token_address, rpc_url, weth_address, router_address)
     return _run_forge_test(victim_address, test_content)
 
 def run_honeypot_simulation_eth(victim_address: str, rpc_url: str) -> Dict[str, Any]:
