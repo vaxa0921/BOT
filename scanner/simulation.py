@@ -404,24 +404,18 @@ def _get_sequencer_fee_logic(bug_type: Optional[str]) -> str:
         return ""
     
     return """
-        // Adaptive Simulation for Sequencer Fee
-        // Try calling any public function (or raw call) with 0.0001 ETH
-        // and check if balance increases (due to GASPRICE manipulation or L2 logic)
-        vm.deal(attacker, 1 ether); // Ensure enough funds
+        vm.deal(attacker, 1 ether);
         uint256 sfBalBefore = attacker.balance;
         
         bool sfSuccess;
-        // Try raw call first
         (sfSuccess, ) = victim.call{value: 0.0001 ether}("");
         
         if (!sfSuccess) {
-            // Try common functions if raw fails
              (sfSuccess, ) = victim.call{value: 0.0001 ether}(abi.encodeWithSignature("execute()"));
         }
         
         if (sfSuccess) {
              uint256 sfBalAfter = attacker.balance;
-             // Check if we profited
              if (sfBalAfter > sfBalBefore) {
                  console.log("PROFIT_WEI:", sfBalAfter - sfBalBefore);
                  console.log("SUCCESS_METHOD: sequencer_fee_exploit");
@@ -429,6 +423,16 @@ def _get_sequencer_fee_logic(bug_type: Optional[str]) -> str:
                  return;
              }
         }
+
+        uint256 sfBalAfterFinal = attacker.balance;
+        if (sfBalAfterFinal >= sfBalBefore) {
+            console.log("PROFIT_WEI:", sfBalAfterFinal - sfBalBefore);
+        } else {
+            console.log("PROFIT_WEI: -", sfBalBefore - sfBalAfterFinal);
+        }
+        console.log("SUCCESS_METHOD: sequencer_fee_no_profit");
+        vm.stopPrank();
+        return;
     """
 
 def generate_honeypot_test_token(victim_address: str, token_address: str, rpc_url: str, weth_address: str, router_address: str, self_destruct_selectors: List[str] = None, bug_type: Optional[str] = None) -> str:
