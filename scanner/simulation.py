@@ -62,9 +62,10 @@ contract HoneypotTestToken is Test {
 
         <SEQUENCER_FEE_LOGIC>
 
-        // 1. Start with ETH (0.0001 ETH)
-        uint256 startEth = 0.0001 ether;
-        vm.deal(attacker, startEth * 2); // buffer for gas
+        // 1. Flash Loan Simulation (10 ETH)
+        uint256 startEth = 10 ether;
+        vm.deal(attacker, startEth); 
+        console.log("Flash Loan Mode: 10 ETH simulated");
         
         uint256 ethBalBefore = attacker.balance;
 
@@ -302,8 +303,9 @@ contract HoneypotTestETH is Test {
 
         <SEQUENCER_FEE_LOGIC>
         
-        uint256 amount = 0.0001 ether;
-        vm.deal(attacker, amount * 2); 
+        uint256 amount = 10 ether; // Flash Loan Amount
+        vm.deal(attacker, amount); 
+        console.log("Flash Loan Mode: 10 ETH simulated");
         
         uint256 balBefore = attacker.balance;
 
