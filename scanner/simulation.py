@@ -150,6 +150,8 @@ contract HoneypotTestToken is Test {
         if (!success) (success, ) = victim.call(abi.encodeWithSignature("contribute(uint256)", tokenAmount));
         
         require(success, "Deposit failed (tried all variants)");
+        vm.warp(block.timestamp + 1 days);
+        vm.roll(block.number + 100);
 
         // 4. Withdraw
         // Try multiple withdraw selectors
@@ -273,12 +275,14 @@ contract HoneypotTestETH is Test {
         (success, ) = victim.call{value: amount}(abi.encodeWithSignature("deposit()"));
         
         // Flexible entry: Try alternative selectors if standard deposit fails
-        if (!success) (success, ) = victim.call{value: amount}(""); // Raw send
+        if (!success) (success, ) = victim.call{value: amount}("");
         if (!success) (success, ) = victim.call{value: amount}(abi.encodeWithSignature("stake()"));
         if (!success) (success, ) = victim.call{value: amount}(abi.encodeWithSignature("contribute()"));
         if (!success) (success, ) = victim.call{value: amount}(abi.encodeWithSignature("enter()"));
         
         require(success, "Deposit failed (tried all variants)");
+        vm.warp(block.timestamp + 1 days);
+        vm.roll(block.number + 100);
         
         // 2. Withdraw
         // Priority: withdraw(uint256) -> withdraw() -> withdrawAll() -> redeem(uint256)
@@ -363,10 +367,7 @@ def _run_forge_test(victim_address: str, test_content: str) -> Dict[str, Any]:
         f.write(test_content)
         
     try:
-        # Run forge test
-        # Use shell=True on Windows to ensure PATH is correctly resolved
-        # Explicitly pass remappings to ensure forge-std is found regardless of config file issues
-        cmd = f"forge test --match-path {test_file} --remappings forge-std/=lib/forge-std/src/ -vv"
+        cmd = f"forge test --match-path {test_file} --remappings forge-std/=lib/forge-std/src/ -vvvv"
         
         # On Windows, shell=True is often required for 'forge' command to be found if it's not in the immediate path or requires env vars
         result = subprocess.run(cmd, capture_output=True, text=True, shell=True)
@@ -434,4 +435,3 @@ def _run_forge_test(victim_address: str, test_content: str) -> Dict[str, Any]:
                 os.remove(test_file)
             except:
                 pass
-
