@@ -1,6 +1,9 @@
 """Proxy to implementation resolver."""
 from typing import Optional, Dict, Any
 from web3 import Web3
+import time
+
+_IMPL_CACHE: Dict[str, Any] = {}
 
 
 def get_implementation_address(
@@ -19,6 +22,14 @@ def get_implementation_address(
     Returns:
         Implementation address or None
     """
+    key = f"{proxy_type}:{proxy_address.lower()}"
+    now = time.time()
+    cached = _IMPL_CACHE.get(key)
+    if cached is not None:
+        impl_cached, ts_cached = cached
+        if now - ts_cached < 3600:
+            return impl_cached
+
     try:
         if proxy_type == "eip1967":
             # EIP-1967 storage slots
@@ -28,7 +39,9 @@ def get_implementation_address(
             impl_bytes = w3.eth.get_storage_at(proxy_address, implementation_slot)
             if impl_bytes and impl_bytes != b"\x00" * 32:
                 impl_address = "0x" + impl_bytes[-20:].hex()
-                return Web3.to_checksum_address(impl_address)
+                impl = Web3.to_checksum_address(impl_address)
+                _IMPL_CACHE[key] = (impl, now)
+                return impl
         
         elif proxy_type == "eip1822":
             # EIP-1822 UUPS
@@ -36,7 +49,9 @@ def get_implementation_address(
             impl_bytes = w3.eth.get_storage_at(proxy_address, impl_slot)
             if impl_bytes and impl_bytes != b"\x00" * 32:
                 impl_address = "0x" + impl_bytes[-20:].hex()
-                return Web3.to_checksum_address(impl_address)
+                impl = Web3.to_checksum_address(impl_address)
+                _IMPL_CACHE[key] = (impl, now)
+                return impl
         
         elif proxy_type == "minimal":
             # Minimal proxy (clone) - implementation is in bytecode
@@ -44,13 +59,17 @@ def get_implementation_address(
             if len(code) > 22:  # Has implementation address
                 # Implementation address is typically at position 10-29
                 impl_address = "0x" + code[10:50]
-                return Web3.to_checksum_address(impl_address)
+                impl = Web3.to_checksum_address(impl_address)
+                _IMPL_CACHE[key] = (impl, now)
+                return impl
         
         # Try to call implementation() function
         try:
             abi = [{"constant": True, "inputs": [], "name": "implementation", "outputs": [{"name": "", "type": "address"}], "type": "function"}]
             contract = w3.eth.contract(address=proxy_address, abi=abi)
             impl = contract.functions.implementation().call()
+            if impl:
+                _IMPL_CACHE[key] = (impl, now)
             return impl
         except Exception:
             pass
@@ -58,6 +77,7 @@ def get_implementation_address(
     except Exception:
         pass
     
+    _IMPL_CACHE[key] = (None, now)
     return None
 
 

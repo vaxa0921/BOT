@@ -1,8 +1,10 @@
 import os
 import subprocess
 import logging
+import time
 from typing import Dict, Any, Optional, List
 from web3 import Web3
+from scanner.config import RPCS
 
 logger = logging.getLogger(__name__)
 
@@ -167,8 +169,7 @@ contract HoneypotTestToken is Test {
         <SELF_DESTRUCT_LOGIC>
         
         require(success, "Deposit failed (tried all variants)");
-        vm.warp(block.timestamp + 1 days);
-        vm.roll(block.number + 100);
+        <TIMESTAMP_WARP_LOGIC>
 
         // 4. Withdraw
         // Try multiple withdraw selectors
@@ -330,8 +331,7 @@ contract HoneypotTestETH is Test {
         <SELF_DESTRUCT_LOGIC>
         
         require(success, "Deposit failed (tried all variants)");
-        vm.warp(block.timestamp + 1 days);
-        vm.roll(block.number + 100);
+        <TIMESTAMP_WARP_LOGIC>
         
         // 2. Withdraw
         // Priority: withdraw(uint256) -> withdraw() -> withdrawAll() -> redeem(uint256)
@@ -487,29 +487,40 @@ def _get_rounding_inflation_logic(bug_type: Optional[str]) -> str:
         return ""
 
     return """
-        // Rounding/Inflation Attack Simulation
-        // 1. Deposit 1 wei to get 1 share (or tiny amount)
         uint256 tinyAmount = 1;
         IERC20(token).approve(victim, tinyAmount);
         (bool r1, ) = victim.call(abi.encodeWithSignature("deposit(uint256)", tinyAmount));
         if (!r1) (r1, ) = victim.call(abi.encodeWithSignature("mint(uint256)", tinyAmount));
-        
+
         if (r1) {
-            // 2. Donate massive amount to inflate share price
-            uint256 donation = 0.0001 ether; 
-            if (tokenAmount > donation) {
-                IERC20(token).transfer(victim, donation);
-                console.log("[SIM] Inflation: Donated tokens to vault:", donation);
+            uint256 vaultBalBefore = IERC20(token).balanceOf(victim);
+            uint256 donation = 10 ether;
+            uint256 newVaultBal = vaultBalBefore + donation;
+            deal(token, victim, newVaultBal);
+            
+            uint256 attackerBefore = IERC20(token).balanceOf(attacker);
+
+            IERC20(token).approve(victim, tinyAmount);
+            (bool r2, ) = victim.call(abi.encodeWithSignature("deposit(uint256)", tinyAmount));
+            if (!r2) (r2, ) = victim.call(abi.encodeWithSignature("mint(uint256)", tinyAmount));
+            
+            if (r2) {
+                (bool r3, ) = victim.call(abi.encodeWithSignature("withdraw(uint256)", tinyAmount));
+                if (!r3) (r3, ) = victim.call(abi.encodeWithSignature("redeem(uint256)", tinyAmount));
                 
-                (bool r2, bytes memory data) = victim.call(abi.encodeWithSignature("withdraw(uint256)", tinyAmount));
-                if (!r2) (r2, data) = victim.call(abi.encodeWithSignature("redeem(uint256)", tinyAmount));
-                
-                if (r2) {
-                    uint256 balCheck = IERC20(token).balanceOf(attacker);
-                    console.log("[SIM] Inflation: Withdrew after donation. Balance:", balCheck);
-                }
+                uint256 attackerAfter = IERC20(token).balanceOf(attacker);
+                console.log("[SIM] Inflation: Next deposit+withdraw after donation. Balance delta:", attackerAfter - attackerBefore);
             }
         }
+    """
+
+
+def _get_timestamp_warp_logic(bug_type: Optional[str]) -> str:
+    if bug_type != "timestamp_dependence":
+        return ""
+    return """
+        vm.warp(block.timestamp + 86401);
+        vm.roll(block.number + 100);
     """
 
 
@@ -528,6 +539,8 @@ def generate_honeypot_test_token(victim_address: str, token_address: str, rpc_ur
 
     ri_logic = _get_rounding_inflation_logic(bug_type)
     content = content.replace("<ROUNDING_LOGIC>", ri_logic)
+    tw_logic = _get_timestamp_warp_logic(bug_type)
+    content = content.replace("<TIMESTAMP_WARP_LOGIC>", tw_logic)
     
     return content
 
@@ -540,6 +553,8 @@ def generate_honeypot_test_eth(victim_address: str, rpc_url: str, self_destruct_
 
     sf_logic = _get_sequencer_fee_logic(bug_type)
     content = content.replace("<SEQUENCER_FEE_LOGIC>", sf_logic)
+    tw_logic = _get_timestamp_warp_logic(bug_type)
+    content = content.replace("<TIMESTAMP_WARP_LOGIC>", tw_logic)
     
     return content
 
@@ -554,8 +569,41 @@ def run_honeypot_simulation_token(victim_address: str, token_address: str, rpc_u
         if sd_selectors:
             logger.info(f"Injecting Self-Destruct selectors for {target}")
 
-    test_content = generate_honeypot_test_token(victim_address, token_address, rpc_url, weth_address, router_address, sd_selectors, bug_type)
-    return _run_forge_test(victim_address, test_content)
+    endpoints: List[str] = []
+    if rpc_url:
+        endpoints.append(rpc_url)
+    for e in RPCS:
+        if e not in endpoints:
+            endpoints.append(e)
+
+    backoff = 1.0
+    last_result: Dict[str, Any] = {}
+
+    for endpoint in endpoints:
+        test_content = generate_honeypot_test_token(victim_address, token_address, endpoint, weth_address, router_address, sd_selectors, bug_type)
+        result = _run_forge_test(victim_address, test_content)
+        last_result = result
+        combined = f"{result.get('error') or ''}\n{result.get('output') or ''}"
+        if "429" in combined or "Too Many Requests" in combined:
+            logger.warning(f"RPC 429 detected during token simulation on {endpoint}, backing off for {backoff} seconds")
+            time.sleep(backoff)
+            backoff = min(backoff * 2, 30.0)
+            continue
+        if bug_type == "vault_rounding_dust" and result.get("safe") and result.get("simulated_profit", 0) == 0:
+            logger.info("[INFO] Vault secure against simple 10 ETH inflation")
+            try:
+                print("[INFO] Vault secure against simple 10 ETH inflation", flush=True)
+            except Exception:
+                pass
+        return result
+
+    if bug_type == "vault_rounding_dust" and last_result.get("safe") and last_result.get("simulated_profit", 0) == 0:
+        logger.info("[INFO] Vault secure against simple 10 ETH inflation")
+        try:
+            print("[INFO] Vault secure against simple 10 ETH inflation", flush=True)
+        except Exception:
+            pass
+    return last_result
 
 def run_honeypot_simulation_eth(victim_address: str, rpc_url: str, w3: Optional[Web3] = None, implementation_address: Optional[str] = None, bug_type: Optional[str] = None) -> Dict[str, Any]:
     """
@@ -568,8 +616,29 @@ def run_honeypot_simulation_eth(victim_address: str, rpc_url: str, w3: Optional[
         if sd_selectors:
             logger.info(f"Injecting Self-Destruct selectors for {target}")
 
-    test_content = generate_honeypot_test_eth(victim_address, rpc_url, sd_selectors, bug_type)
-    return _run_forge_test(victim_address, test_content)
+    endpoints: List[str] = []
+    if rpc_url:
+        endpoints.append(rpc_url)
+    for e in RPCS:
+        if e not in endpoints:
+            endpoints.append(e)
+
+    backoff = 1.0
+    last_result: Dict[str, Any] = {}
+
+    for endpoint in endpoints:
+        test_content = generate_honeypot_test_eth(victim_address, endpoint, sd_selectors, bug_type)
+        result = _run_forge_test(victim_address, test_content)
+        last_result = result
+        combined = f"{result.get('error') or ''}\n{result.get('output') or ''}"
+        if "429" in combined or "Too Many Requests" in combined:
+            logger.warning(f"RPC 429 detected during ETH simulation on {endpoint}, backing off for {backoff} seconds")
+            time.sleep(backoff)
+            backoff = min(backoff * 2, 30.0)
+            continue
+        return result
+
+    return last_result
 
 def _run_forge_test(victim_address: str, test_content: str) -> Dict[str, Any]:
     # Save to temporary file

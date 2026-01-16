@@ -45,8 +45,9 @@ def watch(w3: Web3) -> None:
 
 async def _watch_async() -> None:
     """Async implementation of block watcher."""
-    # Initialize async web3
-    provider = AsyncWebsocketProvider(RPCS_WS[0]) if (USE_WS and RPCS_WS and AsyncWebsocketProvider) else AsyncHTTPProvider(RPCS[0])
+    use_ws = bool(USE_WS and RPCS_WS and AsyncWebsocketProvider)
+    rpc_index = 0
+    provider = AsyncWebsocketProvider(RPCS_WS[rpc_index]) if use_ws else AsyncHTTPProvider(RPCS[rpc_index])
     async_w3 = AsyncWeb3(provider)
     if not await async_w3.is_connected():
         raise ConnectionError("Cannot connect to async RPC")
@@ -61,6 +62,7 @@ async def _watch_async() -> None:
     # Cache watchlist
     watchlist_addrs = set()
     last_wl_update = 0
+    backoff = 1.0
     
     while True:
         # Update watchlist cache
@@ -211,8 +213,24 @@ async def _watch_async() -> None:
             last_block = end_block
             
         except Exception as e:
+            msg = str(e)
             logger.error(f"Async watcher error: {e}")
-            await asyncio.sleep(5)
+            if "429" in msg or "Too Many Requests" in msg:
+                await asyncio.sleep(backoff)
+                if backoff < 30.0:
+                    backoff *= 2.0
+            else:
+                await asyncio.sleep(5)
+            try:
+                if use_ws and RPCS_WS:
+                    rpc_index = (rpc_index + 1) % len(RPCS_WS)
+                    provider = AsyncWebsocketProvider(RPCS_WS[rpc_index])
+                elif RPCS:
+                    rpc_index = (rpc_index + 1) % len(RPCS)
+                    provider = AsyncHTTPProvider(RPCS[rpc_index])
+                async_w3 = AsyncWeb3(provider)
+            except Exception as conn_err:
+                logger.error(f"Failed to rotate async RPC endpoint: {conn_err}")
 
 
 def _watch_sync(w3: Web3) -> None:
@@ -230,6 +248,7 @@ def _watch_sync(w3: Web3) -> None:
             time.sleep(5)
             return
 
+    backoff = 1.0
     while True:
         try:
             current: int = w3.eth.block_number
@@ -256,9 +275,9 @@ def _watch_sync(w3: Web3) -> None:
 
         except Exception as e:
             logger.error(f"Watcher error {e}")
+            msg = str(e)
             try:
                 from scanner.config import RPCS
-                # rotate RPCs on error
                 for endpoint in RPCS:
                     try:
                         w3 = Web3(Web3.HTTPProvider(endpoint))
@@ -268,4 +287,9 @@ def _watch_sync(w3: Web3) -> None:
                         continue
             except Exception:
                 pass
-            time.sleep(5)
+            if "429" in msg or "Too Many Requests" in msg:
+                time.sleep(backoff)
+                if backoff < 30.0:
+                    backoff *= 2.0
+            else:
+                time.sleep(5)

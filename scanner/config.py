@@ -22,8 +22,18 @@ except Exception:
 RPC_HTTP: str = os.getenv("RPC_HTTP", "https://mainnet.base.org")
 RPC_WSS: str = os.getenv("RPC_WSS", "wss://mainnet.base.org")
 
-RPCS: List[str] = [RPC_HTTP]
-RPCS_WS: List[str] = [RPC_WSS]
+rpc_http_list_raw = os.getenv("RPC_HTTP_LIST", "")
+rpc_wss_list_raw = os.getenv("RPC_WSS_LIST", "")
+
+if rpc_http_list_raw:
+    RPCS: List[str] = [u.strip() for u in rpc_http_list_raw.split(",") if u.strip()]
+else:
+    RPCS: List[str] = [RPC_HTTP]
+
+if rpc_wss_list_raw:
+    RPCS_WS: List[str] = [u.strip() for u in rpc_wss_list_raw.split(",") if u.strip()]
+else:
+    RPCS_WS: List[str] = [RPC_WSS]
 USE_WS: bool = os.getenv("USE_WS", "1").lower() in ("1", "true", "yes")
 
 WORKERS: int = int(os.getenv("WORKERS", "4"))
