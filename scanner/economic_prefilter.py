@@ -70,10 +70,8 @@ def negative_knowledge_skip(
         True if should skip (is safe), False if should analyze
     """
     if known_safe_patterns is None:
-        known_safe_patterns = [
-            "6060604052",  # Common safe initialization
-            "6080604052"   # Another safe pattern
-        ]
+        known_safe_patterns = []  # User requested mass scan: removed standard preambles to scan everything
+
     
     bytecode_lower = bytecode.lower()
     

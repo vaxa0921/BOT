@@ -36,7 +36,8 @@ else:
     RPCS_WS: List[str] = [RPC_WSS]
 USE_WS: bool = os.getenv("USE_WS", "1").lower() in ("1", "true", "yes")
 
-WORKERS: int = int(os.getenv("WORKERS", "4"))
+WORKERS: int = int(os.getenv("WORKERS", "10"))
+
 ALERT_CHECK_INTERVAL: int = 60
 
 MAX_TX: int = 50
@@ -126,7 +127,7 @@ SKIP_VERIFIED: bool = os.getenv("SKIP_VERIFIED", "0").lower() in ("1", "true", "
 USE_FLASHLOAN: bool = True
 
 # Profit guardrails
-MIN_NET_PROFIT_WEI: int = int(0.00005 * 10**18)
+MIN_NET_PROFIT_WEI: int = int(0.005 * 10**18)
 ADAPTIVE_PROFIT_ENABLE: bool = True
 ADAPTIVE_BASE_MIN_WEI: int = MIN_NET_PROFIT_WEI
 ADAPTIVE_SLIPPAGE_SAFETY_BPS: int = 300
