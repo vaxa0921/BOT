@@ -123,6 +123,8 @@ MAX_BET_SIZE_WEI: int = int(MAX_BET_SIZE_ETH * 10**18)
 
 SKIP_VERIFIED: bool = os.getenv("SKIP_VERIFIED", "0").lower() in ("1", "true", "yes")
 
+USE_FLASHLOAN: bool = True
+
 # Profit guardrails
 MIN_NET_PROFIT_WEI: int = int(0.00005 * 10**18)
 ADAPTIVE_PROFIT_ENABLE: bool = True
