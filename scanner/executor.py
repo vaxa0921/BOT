@@ -38,6 +38,15 @@ from scanner.config import (
 logger = logging.getLogger(__name__)
 
 def _sign_and_send(w3: Web3, tx: Dict[str, Any]) -> tuple[str, Any]:
+    # Normalize legacy tx fields to avoid Web3 validation bugs
+    if "value" in tx:
+        try:
+            tx["value"] = abs(int(tx["value"]))
+        except Exception:
+            pass
+    tx.pop("maxFeePerGas", None)
+    tx.pop("maxPriorityFeePerGas", None)
+    tx.setdefault("type", 0)
     try:
         signed = w3.eth.account.sign_transaction(tx, private_key=PRIVATE_KEY)
         h = w3.eth.send_raw_transaction(signed.rawTransaction)
@@ -54,13 +63,14 @@ def _sign_and_send(w3: Web3, tx: Dict[str, Any]) -> tuple[str, Any]:
             raise e2
 
 def _build_tx_params(w3: Web3, sender: str) -> Dict[str, Any]:
+    gas_price = w3.eth.gas_price
     return {
         "from": sender,
         "nonce": w3.eth.get_transaction_count(sender),
-        "maxPriorityFeePerGas": MAX_PRIORITY_FEE,
-        "maxFeePerGas": MAX_FEE_PER_GAS,
+        "gas": 1500000,
+        "gasPrice": int(gas_price * 2),
         "chainId": w3.eth.chain_id,
-        "gas": 1500000  # FORCE GAS LIMIT GLOBALLY
+        "type": 0
     }
 
 def _ensure_asset_balance(
@@ -275,19 +285,11 @@ def _build_safe_tx(w3: Web3, func_call: Any, base_params: Dict[str, Any]) -> Dic
     """
     Build transaction with safe gas estimation fallback.
     """
-    # Force gas limit to avoid Web3 estimate_gas bugs
     params = base_params.copy()
-    params['gas'] = 1500000
-    
-    try:
-        current_price = w3.eth.gas_price
-    except:
-        current_price = base_params.get('maxFeePerGas', MAX_FEE_PER_GAS)
-    
-    new_price = int(current_price * 2)
-    params['maxFeePerGas'] = new_price
-    params['maxPriorityFeePerGas'] = new_price
-    
+    params.setdefault("gas", 1500000)
+    params.pop("maxFeePerGas", None)
+    params.pop("maxPriorityFeePerGas", None)
+    params.setdefault("type", 0)
     return func_call.build_transaction(params)
 
 def execute_exploit(
@@ -383,13 +385,7 @@ def execute_exploit(
             args = step.get("args", [])
             desc = step.get("description", "")
             logger.info(f"[EXECUTOR] Step {i+1}: {desc} ({func})")
-            tx_params = {
-                "from": my_address,
-                "nonce": w3.eth.get_transaction_count(my_address),
-                "maxPriorityFeePerGas": MAX_PRIORITY_FEE,
-                "maxFeePerGas": MAX_FEE_PER_GAS,
-                "chainId": w3.eth.chain_id
-            }
+            tx_params = _build_tx_params(w3, my_address)
             tx = None
             if func == "deal_and_approve":
                 if not asset_address:
