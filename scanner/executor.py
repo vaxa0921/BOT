@@ -59,7 +59,8 @@ def _build_tx_params(w3: Web3, sender: str) -> Dict[str, Any]:
         "nonce": w3.eth.get_transaction_count(sender),
         "maxPriorityFeePerGas": MAX_PRIORITY_FEE,
         "maxFeePerGas": MAX_FEE_PER_GAS,
-        "chainId": w3.eth.chain_id
+        "chainId": w3.eth.chain_id,
+        "gas": 1500000  # FORCE GAS LIMIT GLOBALLY
     }
 
 def _ensure_asset_balance(
