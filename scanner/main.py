@@ -27,6 +27,7 @@ from scanner.economic_prefilter import economic_prefilter, negative_knowledge_sk
 from scanner.crash_safe import CrashSafeOrchestrator, save_progress, load_progress
 from scanner.auto_report_generator import generate_report, save_report
 from scanner.false_positive_suppression import suppress_false_positives
+from scanner.simulation import run_honeypot_simulation_eth, run_honeypot_simulation_token
 from scanner.share_asset_conversion import detect_share_asset_conversion
 from scanner.dust_tracker import detect_rounding_dust
 from scanner.fee_on_transfer_probe import cheap_fot_candidate
