@@ -2,6 +2,8 @@ import os
 import subprocess
 import logging
 import time
+import asyncio
+from concurrent.futures import ThreadPoolExecutor
 from typing import Dict, Any, Optional, List
 from web3 import Web3
 from scanner.config import RPCS
@@ -607,7 +609,7 @@ def run_honeypot_simulation_token(victim_address: str, token_address: str, rpc_u
 
         for scenario in scenarios:
             test_content = scenario["content"]
-            result = _run_forge_test(victim_address, test_content)
+            result = _run_forge_test(victim_address, test_content, unique_id=scenario["label"])
             last_result = result
             if not best_result or result.get("simulated_profit", 0) > best_result.get("simulated_profit", 0):
                 best_result = result
@@ -694,11 +696,25 @@ def run_honeypot_simulation_eth(victim_address: str, rpc_url: str, w3: Optional[
 
         best_result: Dict[str, Any] = {}
 
-        for scenario in scenarios:
+        async def _run_batch():
+            loop = asyncio.get_running_loop()
+            tasks = []
+            for sc in scenarios:
+                tasks.append(loop.run_in_executor(None, _run_forge_test, victim_address, sc["content"], sc["label"]))
+            return await asyncio.gather(*tasks)
+
+        results = []
+        try:
+            # Use a new event loop for this thread
+            results = asyncio.run(_run_batch())
+        except Exception as e:
+            logger.error(f"Parallel simulation failed: {e}")
+        
+        for i, result in enumerate(results):
+            scenario = scenarios[i]
             value = abs(int(scenario["amount_wei"]))
             print(f"!!! SIMULATION DEBUG: value={value}", flush=True)
-            test_content = scenario["content"]
-            result = _run_forge_test(victim_address, test_content)
+            
             result["loan_amount_wei"] = value
             last_result = result
 
@@ -720,9 +736,10 @@ def run_honeypot_simulation_eth(victim_address: str, rpc_url: str, w3: Optional[
 
     return last_result
 
-def _run_forge_test(victim_address: str, test_content: str) -> Dict[str, Any]:
+def _run_forge_test(victim_address: str, test_content: str, unique_id: str = "") -> Dict[str, Any]:
     # Save to temporary file
-    test_file = f"test/Honeypot_{victim_address[:8]}.t.sol"
+    suffix = f"_{unique_id}" if unique_id else ""
+    test_file = f"test/Honeypot_{victim_address[:8]}{suffix}.t.sol"
     
     # Ensure test dir exists
     if not os.path.exists("test"):

@@ -36,7 +36,7 @@ else:
     RPCS_WS: List[str] = [RPC_WSS]
 USE_WS: bool = os.getenv("USE_WS", "1").lower() in ("1", "true", "yes")
 
-WORKERS: int = int(os.getenv("WORKERS", "10"))
+WORKERS: int = int(os.getenv("WORKERS", "15"))
 
 ALERT_CHECK_INTERVAL: int = 60
 
