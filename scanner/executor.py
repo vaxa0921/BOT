@@ -41,7 +41,7 @@ def _sign_and_send(w3: Web3, tx: Dict[str, Any]) -> tuple[str, Any]:
     # Normalize legacy tx fields to avoid Web3 validation bugs
     if "value" in tx:
         try:
-            tx["value"] = abs(int(tx["value"]))
+            tx["value"] = int(tx["value"])
         except Exception:
             pass
     tx.pop("maxFeePerGas", None)
