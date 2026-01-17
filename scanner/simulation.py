@@ -274,7 +274,7 @@ contract HoneypotTestToken is Test {
         }
         
         // We consider it "Safe" if we got here (swapped in, deposited, withdrawn, swapped out)
-        console.log("SUCCESS_METHOD:", "token_swap_flow");
+        console.log("SUCCESS_METHOD:", "FLASH_LOAN_V2_SUCCESS");
         vm.stopPrank();
     }
 }
@@ -668,16 +668,48 @@ def run_honeypot_simulation_eth(victim_address: str, rpc_url: str, w3: Optional[
     last_result: Dict[str, Any] = {}
 
     for endpoint in endpoints:
-        test_content = generate_honeypot_test_eth(victim_address, endpoint, sd_selectors, bug_type)
-        result = _run_forge_test(victim_address, test_content)
-        last_result = result
-        combined = f"{result.get('error') or ''}\n{result.get('output') or ''}"
-        if "429" in combined or "Too Many Requests" in combined:
-            logger.warning(f"RPC 429 detected during ETH simulation on {endpoint}, backing off for {backoff} seconds")
-            time.sleep(backoff)
-            backoff = min(backoff * 2, 30.0)
-            continue
-        return result
+        base_content = generate_honeypot_test_eth(victim_address, endpoint, sd_selectors, bug_type)
+        scenarios: List[Dict[str, Any]] = []
+
+        scenarios.append({
+            "label": "20_eth",
+            "amount_wei": 20 * 10**18,
+            "content": base_content
+        })
+        scenarios.append({
+            "label": "5_eth",
+            "amount_wei": 5 * 10**18,
+            "content": base_content.replace("uint256 amount = 20 ether;", "uint256 amount = 5 ether;")
+        })
+        scenarios.append({
+            "label": "1_eth",
+            "amount_wei": 1 * 10**18,
+            "content": base_content.replace("uint256 amount = 20 ether;", "uint256 amount = 1 ether;")
+        })
+
+        best_result: Dict[str, Any] = {}
+
+        for scenario in scenarios:
+            test_content = scenario["content"]
+            result = _run_forge_test(victim_address, test_content)
+            result["loan_amount_wei"] = scenario["amount_wei"]
+            last_result = result
+
+            combined = f"{result.get('error') or ''}\n{result.get('output') or ''}"
+            if "429" in combined or "Too Many Requests" in combined:
+                logger.warning(f"RPC 429 detected during ETH simulation on {endpoint}, backing off for {backoff} seconds")
+                time.sleep(backoff)
+                backoff = min(backoff * 2, 30.0)
+                break
+
+            if result.get("safe") and result.get("simulated_profit", 0) > 0:
+                return result
+
+            if not best_result or result.get("simulated_profit", 0) > best_result.get("simulated_profit", 0):
+                best_result = result
+
+        if best_result:
+            return best_result
 
     return last_result
 
