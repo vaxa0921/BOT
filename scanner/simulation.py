@@ -690,9 +690,11 @@ def run_honeypot_simulation_eth(victim_address: str, rpc_url: str, w3: Optional[
         best_result: Dict[str, Any] = {}
 
         for scenario in scenarios:
+            value = abs(int(scenario["amount_wei"]))
+            print(f"!!! SIMULATION DEBUG: value={value}", flush=True)
             test_content = scenario["content"]
             result = _run_forge_test(victim_address, test_content)
-            result["loan_amount_wei"] = scenario["amount_wei"]
+            result["loan_amount_wei"] = value
             last_result = result
 
             combined = f"{result.get('error') or ''}\n{result.get('output') or ''}"
