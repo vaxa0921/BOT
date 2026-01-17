@@ -686,6 +686,11 @@ def run_honeypot_simulation_eth(victim_address: str, rpc_url: str, w3: Optional[
             "amount_wei": 1 * 10**18,
             "content": base_content.replace("uint256 amount = 20 ether;", "uint256 amount = 1 ether;")
         })
+        scenarios.append({
+            "label": "1_wei",
+            "amount_wei": 1,
+            "content": base_content.replace("uint256 amount = 20 ether;", "uint256 amount = 1 wei;")
+        })
 
         best_result: Dict[str, Any] = {}
 
