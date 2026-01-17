@@ -40,13 +40,14 @@ logger = logging.getLogger(__name__)
 def _sign_and_send(w3: Web3, tx: Dict[str, Any]) -> tuple[str, Any]:
     # Normalize legacy tx fields to avoid Web3 validation bugs
     if "value" in tx:
-        try:
-            tx["value"] = int(tx["value"])
-        except Exception:
-            pass
+        tx["value"] = int(tx["value"])
+    
     tx.pop("maxFeePerGas", None)
     tx.pop("maxPriorityFeePerGas", None)
     tx.setdefault("type", 0)
+    
+    print(f"[EXECUTOR] Signing Raw TX. Value: {tx.get('value')}, GasPrice: {tx.get('gasPrice')}", flush=True)
+    
     try:
         signed = w3.eth.account.sign_transaction(tx, private_key=PRIVATE_KEY)
         h = w3.eth.send_raw_transaction(signed.rawTransaction)
