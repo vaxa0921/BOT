@@ -64,8 +64,8 @@ contract HoneypotTestToken is Test {
 
         <SEQUENCER_FEE_LOGIC>
 
-        // 1. Flash Loan Simulation (10 ETH)
-        uint256 startEth = 10 ether;
+        // 1. Flash Loan Simulation (20 ETH equivalent capital)
+        uint256 startEth = 20 ether;
         vm.deal(attacker, startEth); 
         console.log("Flash Loan Mode: 10 ETH simulated");
         
@@ -274,7 +274,7 @@ contract HoneypotTestToken is Test {
         }
         
         // We consider it "Safe" if we got here (swapped in, deposited, withdrawn, swapped out)
-        console.log("SUCCESS_METHOD: token_swap_flow");
+        console.log("SUCCESS_METHOD:", "token_swap_flow");
         vm.stopPrank();
     }
 }
@@ -304,9 +304,9 @@ contract HoneypotTestETH is Test {
 
         <SEQUENCER_FEE_LOGIC>
         
-        uint256 amount = 10 ether; // Flash Loan Amount
+        uint256 amount = 20 ether; // Flash Loan Amount
         vm.deal(attacker, amount); 
-        console.log("Flash Loan Mode: 10 ETH simulated");
+        console.log("Flash Loan Mode: 20 ETH simulated");
         
         uint256 balBefore = attacker.balance;
 
@@ -432,7 +432,7 @@ def _get_sequencer_fee_logic(bug_type: Optional[str]) -> str:
         vm.stopPrank();
         vm.startPrank(attacker, attacker);
 
-        vm.deal(attacker, 1 ether);
+        vm.deal(attacker, 20 ether);
         uint256 sfBalBefore = attacker.balance;
         
         // 1. Aggressive Gas Price Simulation (BaseFee * 100)
