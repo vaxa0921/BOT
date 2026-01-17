@@ -1,5 +1,5 @@
 """Proxy to implementation resolver."""
-from typing import Optional, Dict
+from typing import Optional, Dict, Any
 from web3 import Web3
 
 _IMPL_CACHE: Dict[str, Optional[str]] = {}

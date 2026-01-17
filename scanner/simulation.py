@@ -578,7 +578,7 @@ def run_honeypot_simulation_token(victim_address: str, token_address: str, rpc_u
         if e not in endpoints:
             endpoints.append(e)
 
-    backoff = 1.0
+    backoff = 0.5
     last_result: Dict[str, Any] = {}
 
     for endpoint in endpoints:
@@ -608,6 +608,7 @@ def run_honeypot_simulation_token(victim_address: str, token_address: str, rpc_u
         zero_profit_safe = False
 
         for scenario in scenarios:
+            time.sleep(0.1)
             test_content = scenario["content"]
             result = _run_forge_test(victim_address, test_content, unique_id=scenario["label"])
             last_result = result
@@ -666,8 +667,9 @@ def run_honeypot_simulation_eth(victim_address: str, rpc_url: str, w3: Optional[
         if e not in endpoints:
             endpoints.append(e)
 
-    backoff = 1.0
-    last_result: Dict[str, Any] = {}
+    backoff = 0.5
+    best_result_overall: Dict[str, Any] = {}
+    last_result: Dict[str, Any] = {} # Initialize last_result
 
     for endpoint in endpoints:
         base_content = generate_honeypot_test_eth(victim_address, endpoint, sd_selectors, bug_type)
@@ -694,13 +696,17 @@ def run_honeypot_simulation_eth(victim_address: str, rpc_url: str, w3: Optional[
             "content": base_content.replace("uint256 amount = 20 ether;", "uint256 amount = 1 wei;")
         })
 
-        best_result: Dict[str, Any] = {}
+        current_best: Dict[str, Any] = {}
+
+        async def _run_one(sc, delay: float):
+            await asyncio.sleep(delay)
+            loop = asyncio.get_running_loop()
+            return await loop.run_in_executor(None, _run_forge_test, victim_address, sc["content"], sc["label"])
 
         async def _run_batch():
-            loop = asyncio.get_running_loop()
             tasks = []
-            for sc in scenarios:
-                tasks.append(loop.run_in_executor(None, _run_forge_test, victim_address, sc["content"], sc["label"]))
+            for idx, sc in enumerate(scenarios):
+                tasks.append(_run_one(sc, idx * 0.1))
             return await asyncio.gather(*tasks)
 
         results = []
@@ -728,13 +734,15 @@ def run_honeypot_simulation_eth(victim_address: str, rpc_url: str, w3: Optional[
             if result.get("safe") and result.get("simulated_profit", 0) > 0:
                 return result
 
-            if not best_result or result.get("simulated_profit", 0) > best_result.get("simulated_profit", 0):
-                best_result = result
+            if not current_best or result.get("simulated_profit", 0) > current_best.get("simulated_profit", 0):
+                current_best = result
 
-        if best_result:
-            return best_result
+        if current_best.get("simulated_profit", 0) > best_result_overall.get("simulated_profit", 0):
+            best_result_overall = current_best
+            
+        # Continue to next endpoint if no success returned
 
-    return last_result
+    return best_result_overall if best_result_overall else last_result
 
 def _run_forge_test(victim_address: str, test_content: str, unique_id: str = "") -> Dict[str, Any]:
     # Save to temporary file

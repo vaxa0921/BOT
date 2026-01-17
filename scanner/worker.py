@@ -159,7 +159,7 @@ def process_contract(w3: Web3, addr: str) -> None:
     if is_processed(addr, "full_analysis"):
         return
     
-    def _process():
+    def _process(_=None):
         try:
             print(f"[WORKER] Start {addr}", flush=True)
             # Step 1: Cheap - Get bytecode and analyze

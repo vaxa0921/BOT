@@ -62,7 +62,7 @@ async def _watch_async() -> None:
     # Cache watchlist
     watchlist_addrs = set()
     last_wl_update = 0
-    backoff = 1.0
+    backoff = 0.5
     
     while True:
         # Update watchlist cache
@@ -211,6 +211,7 @@ async def _watch_async() -> None:
                             logger.error(f"Error fetching receipt: {e}")
 
             last_block = end_block
+            backoff = 0.5
             
         except Exception as e:
             msg = str(e)
@@ -225,9 +226,11 @@ async def _watch_async() -> None:
                 if use_ws and RPCS_WS:
                     rpc_index = (rpc_index + 1) % len(RPCS_WS)
                     provider = AsyncWebsocketProvider(RPCS_WS[rpc_index])
+                    logger.info(f"Rotated to WS RPC #{rpc_index}")
                 elif RPCS:
                     rpc_index = (rpc_index + 1) % len(RPCS)
                     provider = AsyncHTTPProvider(RPCS[rpc_index])
+                    logger.info(f"Rotated to HTTP RPC #{rpc_index}: {RPCS[rpc_index]}")
                 async_w3 = AsyncWeb3(provider)
             except Exception as conn_err:
                 logger.error(f"Failed to rotate async RPC endpoint: {conn_err}")
@@ -248,7 +251,7 @@ def _watch_sync(w3: Web3) -> None:
             time.sleep(5)
             return
 
-    backoff = 1.0
+    backoff = 0.5
     while True:
         try:
             current: int = w3.eth.block_number
