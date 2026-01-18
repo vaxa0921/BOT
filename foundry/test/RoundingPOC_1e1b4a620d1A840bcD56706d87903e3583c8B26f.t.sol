@@ -24,7 +24,7 @@ contract RoundingPOC_1e1b4a620d1A840bcD56706d87903e3583c8B26f is Test {
     
     function setUp() public {
         // Forking environment
-        vm.createSelectFork("https://dawn-soft-energy.base-mainnet.quiknode.pro/05848a3eeddb14b2832a80f104a13293c5340054/");
+        vm.createSelectFork("https://base.publicnode.com");
         v = IVault(TARGET);
     }
     

@@ -24,7 +24,7 @@ contract RoundingPOC_776236aeAD8A58AC9eC3CF214CDa3c6335f46B2d is Test {
     
     function setUp() public {
         // Forking environment
-        vm.createSelectFork("https://mainnet.base.org");
+        vm.createSelectFork("https://base.publicnode.com");
         v = IVault(TARGET);
     }
     

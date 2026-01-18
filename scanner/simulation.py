@@ -721,15 +721,20 @@ def run_honeypot_simulation_eth(victim_address: str, rpc_url: str, w3: Optional[
 
         results = []
         try:
-            # Use a new event loop for this thread
-            results = asyncio.run(_run_batch())
+            if os.name == "nt":
+                for idx, sc in enumerate(scenarios):
+                    time.sleep(0.1 * idx)
+                    result = _run_forge_test(victim_address, sc["content"], sc["label"])
+                    results.append(result)
+            else:
+                results = asyncio.run(_run_batch())
         except Exception as e:
             logger.error(f"Parallel simulation failed: {e}")
         
         for i, result in enumerate(results):
             scenario = scenarios[i]
             value = abs(int(scenario["amount_wei"]))
-            print(f"!!! SIMULATION DEBUG: value={value}", flush=True)
+            # print(f"!!! SIMULATION DEBUG: value={value}", flush=True)
             
             result["loan_amount_wei"] = value
             last_result = result
