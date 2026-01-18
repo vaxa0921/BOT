@@ -18,8 +18,8 @@ interface IVault {
     function totalSupply() external view returns(uint256);
 }
 
-contract RoundingPOC_B7639F5b2f9Ac7FC47a34f8f3BbcbE94f5C55458 is Test {
-    address constant TARGET = 0xB7639F5b2f9Ac7FC47a34f8f3BbcbE94f5C55458;
+contract RoundingPOC_4D2Fff566f7c2F6c620BB3826f65Ec7D4C970190 is Test {
+    address constant TARGET = 0x4D2Fff566f7c2F6c620BB3826f65Ec7D4C970190;
     IVault v;
     
     function setUp() public {

