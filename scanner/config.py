@@ -103,6 +103,7 @@ MY_WALLET_ADDRESS: str = "0xE81F59678dFA84270E7d9f41608B9605a683c154"
 # Gas Settings
 MAX_PRIORITY_FEE: int = int(0.5 * 10**9)  # 0.5 Gwei for Base
 MAX_FEE_PER_GAS: int = int(10 * 10**9)    # 10 Gwei cap
+MAX_GAS_PRICE_GWEI: int = 0
 
 # Auto swap settings
 AUTO_SWAP: bool = os.getenv("AUTO_SWAP", "").lower() in ("1", "true", "yes")
