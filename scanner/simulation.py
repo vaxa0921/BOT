@@ -578,7 +578,6 @@ def run_honeypot_simulation_token(victim_address: str, token_address: str, rpc_u
         if e not in endpoints:
             endpoints.append(e)
 
-    backoff = 0.5
     last_result: Dict[str, Any] = {}
 
     for endpoint in endpoints:
@@ -617,9 +616,8 @@ def run_honeypot_simulation_token(victim_address: str, token_address: str, rpc_u
 
             combined = f"{result.get('error') or ''}\n{result.get('output') or ''}"
             if "429" in combined or "Too Many Requests" in combined:
-                logger.warning(f"RPC 429 detected during token simulation on {endpoint}, backing off for {backoff} seconds")
-                time.sleep(backoff)
-                backoff = min(backoff * 2, 30.0)
+                logger.warning(f"RPC 429 detected during token simulation on {endpoint}, backing off for 0.5 seconds")
+                time.sleep(0.5)
                 break
 
             if bug_type == "vault_rounding_dust":
@@ -667,7 +665,6 @@ def run_honeypot_simulation_eth(victim_address: str, rpc_url: str, w3: Optional[
         if e not in endpoints:
             endpoints.append(e)
 
-    backoff = 0.5
     best_result_overall: Dict[str, Any] = {}
     last_result: Dict[str, Any] = {} # Initialize last_result
 
@@ -726,9 +723,8 @@ def run_honeypot_simulation_eth(victim_address: str, rpc_url: str, w3: Optional[
 
             combined = f"{result.get('error') or ''}\n{result.get('output') or ''}"
             if "429" in combined or "Too Many Requests" in combined:
-                logger.warning(f"RPC 429 detected during ETH simulation on {endpoint}, backing off for {backoff} seconds")
-                time.sleep(backoff)
-                backoff = min(backoff * 2, 30.0)
+                logger.warning(f"RPC 429 detected during ETH simulation on {endpoint}, backing off for 0.5 seconds")
+                time.sleep(0.5)
                 break
 
             if result.get("safe") and result.get("simulated_profit", 0) > 0:

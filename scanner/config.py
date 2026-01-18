@@ -19,8 +19,8 @@ except Exception:
             if key and value and key not in os.environ:
                 os.environ[key] = value
 
-RPC_HTTP: str = os.getenv("RPC_HTTP", "https://mainnet.base.org")
-RPC_WSS: str = os.getenv("RPC_WSS", "wss://mainnet.base.org")
+RPC_HTTP: str = os.getenv("RPC_HTTP", "https://mainnet.base.org").strip().rstrip(",")
+RPC_WSS: str = os.getenv("RPC_WSS", "wss://mainnet.base.org").strip().rstrip(",")
 
 rpc_http_list_raw = os.getenv("RPC_HTTP_LIST", "")
 rpc_wss_list_raw = os.getenv("RPC_WSS_LIST", "")
