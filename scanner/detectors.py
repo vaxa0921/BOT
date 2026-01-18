@@ -259,6 +259,51 @@ def detect_replay_vulnerability(w3: Web3, contract_address: str) -> Dict[str, An
         
     return result
 
+
+def detect_public_payout_config(w3: Web3, contract_address: str) -> Dict[str, Any]:
+    result: Dict[str, Any] = {"vulnerable": False, "type": "public_payout_config", "details": ""}
+    try:
+        addr = Web3.to_checksum_address(contract_address)
+    except Exception:
+        return result
+
+    try:
+        code = w3.eth.get_code(addr)
+        if not code:
+            return result
+    except Exception:
+        return result
+
+    attacker = "0x1337000000000000000000000000000000000000"
+    attacker_bytes = bytes.fromhex(attacker[2:].rjust(64, "0"))
+
+    candidates = [
+        "setRecipient(address)",
+        "setReceiver(address)",
+        "setBeneficiary(address)",
+        "setPayout(address)",
+        "setFeeRecipient(address)",
+        "setTreasury(address)",
+        "setOwner(address)",
+    ]
+
+    for sig in candidates:
+        try:
+            selector = Web3.keccak(text=sig)[:4]
+            if selector not in code:
+                continue
+            data = selector + attacker_bytes
+            w3.eth.call({"to": addr, "data": data})
+            result["vulnerable"] = True
+            result["details"] = f"{sig} callable without revert; potential public payout configuration."
+            result["signature"] = sig
+            result["selector"] = "0x" + selector.hex()
+            return result
+        except Exception:
+            continue
+
+    return result
+
 def detect_sequencer_fee_manipulation(w3: Web3, contract_address: str) -> Dict[str, Any]:
     """
     Detect Sequencer Fee Manipulation vulnerability.
@@ -311,4 +356,317 @@ def detect_self_destruct_reincarnation(w3: Web3, contract_address: str) -> Dict[
     except Exception:
         pass
         
+    return result
+
+
+def detect_public_owner_change(w3: Web3, contract_address: str) -> Dict[str, Any]:
+    result: Dict[str, Any] = {"vulnerable": False, "type": "public_owner_change", "details": ""}
+    try:
+        addr = Web3.to_checksum_address(contract_address)
+    except Exception:
+        return result
+
+    try:
+        code = w3.eth.get_code(addr)
+        if not code:
+            return result
+    except Exception:
+        return result
+
+    attacker = "0x1337000000000000000000000000000000000000"
+    attacker_bytes = bytes.fromhex(attacker[2:].rjust(64, "0"))
+
+    candidates = [
+        "transferOwnership(address)",
+        "setOwner(address)",
+        "setAdmin(address)",
+        "setGovernor(address)",
+        "setController(address)",
+    ]
+
+    for sig in candidates:
+        try:
+            selector = Web3.keccak(text=sig)[:4]
+            if selector not in code:
+                continue
+            data = selector + attacker_bytes
+            w3.eth.call({"to": addr, "data": data})
+            result["vulnerable"] = True
+            result["details"] = f"{sig} callable without revert; potential public owner change."
+            result["signature"] = sig
+            result["selector"] = "0x" + selector.hex()
+            return result
+        except Exception:
+            continue
+
+    return result
+
+
+def detect_public_fee_change(w3: Web3, contract_address: str) -> Dict[str, Any]:
+    result: Dict[str, Any] = {"vulnerable": False, "type": "public_fee_change", "details": ""}
+    try:
+        addr = Web3.to_checksum_address(contract_address)
+    except Exception:
+        return result
+
+    try:
+        code = w3.eth.get_code(addr)
+        if not code:
+            return result
+    except Exception:
+        return result
+
+    fee_value = (10**9).to_bytes(32, "big")
+
+    candidates = [
+        "setFee(uint256)",
+        "setWithdrawalFee(uint256)",
+        "setPerformanceFee(uint256)",
+        "setManagementFee(uint256)",
+    ]
+
+    for sig in candidates:
+        try:
+            selector = Web3.keccak(text=sig)[:4]
+            if selector not in code:
+                continue
+            data = selector + fee_value
+            w3.eth.call({"to": addr, "data": data})
+            result["vulnerable"] = True
+            result["details"] = f"{sig} callable without revert; potential public fee configuration."
+            result["signature"] = sig
+            result["selector"] = "0x" + selector.hex()
+            result["fee_value"] = int.from_bytes(fee_value, "big")
+            return result
+        except Exception:
+            continue
+
+    return result
+
+
+def detect_unrestricted_mint(w3: Web3, contract_address: str) -> Dict[str, Any]:
+    result: Dict[str, Any] = {"vulnerable": False, "type": "unrestricted_mint", "details": ""}
+    try:
+        addr = Web3.to_checksum_address(contract_address)
+    except Exception:
+        return result
+
+    try:
+        code = w3.eth.get_code(addr)
+        if not code:
+            return result
+    except Exception:
+        return result
+
+    attacker = "0x1337000000000000000000000000000000000000"
+    attacker_bytes = bytes.fromhex(attacker[2:].rjust(64, "0"))
+    amount = (10**24).to_bytes(32, "big")
+
+    two_arg_sigs = [
+        "mint(address,uint256)",
+        "mintTo(address,uint256)",
+    ]
+
+    one_arg_sigs = [
+        "mint(uint256)",
+    ]
+
+    for sig in two_arg_sigs:
+        try:
+            selector = Web3.keccak(text=sig)[:4]
+            if selector not in code:
+                continue
+            data = selector + attacker_bytes + amount
+            w3.eth.call({"to": addr, "data": data})
+            result["vulnerable"] = True
+            result["details"] = f"{sig} callable without revert; potential unrestricted mint."
+            result["signature"] = sig
+            result["selector"] = "0x" + selector.hex()
+            result["amount"] = int.from_bytes(amount, "big")
+            return result
+        except Exception:
+            continue
+
+    for sig in one_arg_sigs:
+        try:
+            selector = Web3.keccak(text=sig)[:4]
+            if selector not in code:
+                continue
+            data = selector + amount
+            w3.eth.call({"to": addr, "data": data})
+            result["vulnerable"] = True
+            result["details"] = f"{sig} callable without revert; potential unrestricted mint."
+            result["signature"] = sig
+            result["selector"] = "0x" + selector.hex()
+            result["amount"] = int.from_bytes(amount, "big")
+            return result
+        except Exception:
+            continue
+
+    return result
+
+
+def detect_public_token_sweep(w3: Web3, contract_address: str) -> Dict[str, Any]:
+    result: Dict[str, Any] = {"vulnerable": False, "type": "public_token_sweep", "details": ""}
+    try:
+        addr = Web3.to_checksum_address(contract_address)
+    except Exception:
+        return result
+
+    try:
+        code = w3.eth.get_code(addr)
+        if not code:
+            return result
+    except Exception:
+        return result
+
+    attacker = "0x1337000000000000000000000000000000000000"
+    attacker_bytes = bytes.fromhex(attacker[2:].rjust(64, "0"))
+    amount = (10**24).to_bytes(32, "big")
+
+    address_only_sigs = [
+        "sweepToken(address)",
+        "recoverERC20(address)",
+    ]
+
+    address_amount_sigs = [
+        "recoverERC20(address,uint256)",
+        "rescueFunds(address,uint256)",
+    ]
+
+    for sig in address_only_sigs:
+        try:
+            selector = Web3.keccak(text=sig)[:4]
+            if selector not in code:
+                continue
+            data = selector + attacker_bytes
+            w3.eth.call({"to": addr, "data": data})
+            result["vulnerable"] = True
+            result["details"] = f"{sig} callable without revert; potential public token sweep."
+            result["signature"] = sig
+            result["selector"] = "0x" + selector.hex()
+            return result
+        except Exception:
+            continue
+
+    for sig in address_amount_sigs:
+        try:
+            selector = Web3.keccak(text=sig)[:4]
+            if selector not in code:
+                continue
+            data = selector + attacker_bytes + amount
+            w3.eth.call({"to": addr, "data": data})
+            result["vulnerable"] = True
+            result["details"] = f"{sig} callable without revert; potential public token sweep."
+            result["signature"] = sig
+            result["selector"] = "0x" + selector.hex()
+            result["amount"] = int.from_bytes(amount, "big")
+            return result
+        except Exception:
+            continue
+
+    return result
+
+
+def detect_public_guardian_config(w3: Web3, contract_address: str) -> Dict[str, Any]:
+    result: Dict[str, Any] = {"vulnerable": False, "type": "public_guardian_config", "details": ""}
+    try:
+        addr = Web3.to_checksum_address(contract_address)
+    except Exception:
+        return result
+
+    try:
+        code = w3.eth.get_code(addr)
+        if not code:
+            return result
+    except Exception:
+        return result
+
+    attacker = "0x1337000000000000000000000000000000000000"
+    attacker_bytes = bytes.fromhex(attacker[2:].rjust(64, "0"))
+    enabled = (1).to_bytes(32, "big")
+
+    address_only_sigs = [
+        "setGuardian(address)",
+        "setEmergencyAdmin(address)",
+    ]
+
+    bool_sigs = [
+        "setPause(bool)",
+        "setEmergencyPause(bool)",
+        "setGuardianPause(bool)",
+    ]
+
+    for sig in address_only_sigs:
+        try:
+            selector = Web3.keccak(text=sig)[:4]
+            if selector not in code:
+                continue
+            data = selector + attacker_bytes
+            w3.eth.call({"to": addr, "data": data})
+            result["vulnerable"] = True
+            result["details"] = f"{sig} callable without revert; potential public guardian configuration."
+            result["signature"] = sig
+            result["selector"] = "0x" + selector.hex()
+            return result
+        except Exception:
+            continue
+
+    for sig in bool_sigs:
+        try:
+            selector = Web3.keccak(text=sig)[:4]
+            if selector not in code:
+                continue
+            data = selector + enabled
+            w3.eth.call({"to": addr, "data": data})
+            result["vulnerable"] = True
+            result["details"] = f"{sig} callable without revert; potential public pause/guardian toggle."
+            result["signature"] = sig
+            result["selector"] = "0x" + selector.hex()
+            return result
+        except Exception:
+            continue
+
+    return result
+
+
+def detect_public_limit_config(w3: Web3, contract_address: str) -> Dict[str, Any]:
+    result: Dict[str, Any] = {"vulnerable": False, "type": "public_limit_config", "details": ""}
+    try:
+        addr = Web3.to_checksum_address(contract_address)
+    except Exception:
+        return result
+
+    try:
+        code = w3.eth.get_code(addr)
+        if not code:
+            return result
+    except Exception:
+        return result
+
+    new_limit = (10**36).to_bytes(32, "big")
+
+    candidates = [
+        "setDepositLimit(uint256)",
+        "setCap(uint256)",
+        "setSupplyCap(uint256)",
+        "setBorrowCap(uint256)",
+    ]
+
+    for sig in candidates:
+        try:
+            selector = Web3.keccak(text=sig)[:4]
+            if selector not in code:
+                continue
+            data = selector + new_limit
+            w3.eth.call({"to": addr, "data": data})
+            result["vulnerable"] = True
+            result["details"] = f"{sig} callable without revert; potential public limit configuration."
+            result["signature"] = sig
+            result["selector"] = "0x" + selector.hex()
+            result["limit"] = int.from_bytes(new_limit, "big")
+            return result
+        except Exception:
+            continue
+
     return result

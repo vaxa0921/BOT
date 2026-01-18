@@ -584,24 +584,27 @@ def run_honeypot_simulation_token(victim_address: str, token_address: str, rpc_u
         base_content = generate_honeypot_test_token(victim_address, token_address, endpoint, weth_address, router_address, sd_selectors, bug_type)
         scenarios: List[Dict[str, Any]] = []
 
-        if bug_type == "vault_rounding_dust":
-            scenarios.append({
-                "label": "10_eth",
-                "content": base_content
-            })
-            scenarios.append({
-                "label": "1_wei",
-                "content": base_content.replace("uint256 startEth = 10 ether;", "uint256 startEth = 1 wei;")
-            })
-            scenarios.append({
-                "label": "100_eth",
-                "content": base_content.replace("uint256 startEth = 10 ether;", "uint256 startEth = 100 ether;")
-            })
-        else:
-            scenarios.append({
-                "label": "default",
-                "content": base_content
-            })
+        # Багато фіксованих сценаріїв за розміром депозита
+        scenarios.append({
+            "label": "10_eth",
+            "content": base_content
+        })
+        scenarios.append({
+            "label": "1_wei",
+            "content": base_content.replace("uint256 startEth = 10 ether;", "uint256 startEth = 1 wei;")
+        })
+        scenarios.append({
+            "label": "1_eth",
+            "content": base_content.replace("uint256 startEth = 10 ether;", "uint256 startEth = 1 ether;")
+        })
+        scenarios.append({
+            "label": "5_eth",
+            "content": base_content.replace("uint256 startEth = 10 ether;", "uint256 startEth = 5 ether;")
+        })
+        scenarios.append({
+            "label": "100_eth",
+            "content": base_content.replace("uint256 startEth = 10 ether;", "uint256 startEth = 100 ether;")
+        })
 
         best_result: Dict[str, Any] = {}
         zero_profit_safe = False
@@ -678,6 +681,11 @@ def run_honeypot_simulation_eth(victim_address: str, rpc_url: str, w3: Optional[
             "content": base_content
         })
         scenarios.append({
+            "label": "10_eth",
+            "amount_wei": 10 * 10**18,
+            "content": base_content.replace("uint256 amount = 20 ether;", "uint256 amount = 10 ether;")
+        })
+        scenarios.append({
             "label": "5_eth",
             "amount_wei": 5 * 10**18,
             "content": base_content.replace("uint256 amount = 20 ether;", "uint256 amount = 5 ether;")
@@ -686,6 +694,11 @@ def run_honeypot_simulation_eth(victim_address: str, rpc_url: str, w3: Optional[
             "label": "1_eth",
             "amount_wei": 1 * 10**18,
             "content": base_content.replace("uint256 amount = 20 ether;", "uint256 amount = 1 ether;")
+        })
+        scenarios.append({
+            "label": "0_1_eth",
+            "amount_wei": int(0.1 * 10**18),
+            "content": base_content.replace("uint256 amount = 20 ether;", "uint256 amount = 0.1 ether;")
         })
         scenarios.append({
             "label": "1_wei",

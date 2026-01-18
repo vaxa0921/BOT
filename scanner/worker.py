@@ -44,7 +44,14 @@ from scanner.detectors import (
     detect_replay_vulnerability,
     detect_timestamp_dependence,
     detect_ghost_liquidity,
-    detect_l1_l2_alias
+    detect_l1_l2_alias,
+    detect_public_payout_config,
+    detect_public_owner_change,
+    detect_public_fee_change,
+    detect_unrestricted_mint,
+    detect_public_token_sweep,
+    detect_public_guardian_config,
+    detect_public_limit_config,
 )
 from scanner.context_leak_detector import detect_multicall_context_leak
 from scanner.watchlist_manager import add_to_watchlist
@@ -257,6 +264,33 @@ def process_contract(w3: Web3, addr: str) -> None:
                     print(f"[FOUND] Cross-Chain Replay vulnerability in {addr}! Details: {replay.get('details')}", flush=True)
                     execute_cautious_exploit(w3, addr, "replay_vulnerability", replay)
 
+                public_payout = detect_public_payout_config(w3, addr)
+                if public_payout.get("vulnerable"):
+                    findings.append({
+                        "type": "public_payout_config",
+                        "data": public_payout
+                    })
+                    print(f"[FOUND] Public Payout Config in {addr}! Details: {public_payout.get('details')}", flush=True)
+                    execute_cautious_exploit(w3, addr, "public_payout_config", public_payout)
+
+                owner_change = detect_public_owner_change(w3, addr)
+                if owner_change.get("vulnerable"):
+                    findings.append({
+                        "type": "public_owner_change",
+                        "data": owner_change
+                    })
+                    print(f"[FOUND] Public Owner Change in {addr}! Details: {owner_change.get('details')}", flush=True)
+                    execute_cautious_exploit(w3, addr, "public_owner_change", owner_change)
+
+                fee_change = detect_public_fee_change(w3, addr)
+                if fee_change.get("vulnerable"):
+                    findings.append({
+                        "type": "public_fee_change",
+                        "data": fee_change
+                    })
+                    print(f"[FOUND] Public Fee Change in {addr}! Details: {fee_change.get('details')}", flush=True)
+                    execute_cautious_exploit(w3, addr, "public_fee_change", fee_change)
+
                 timestamp_dep = detect_timestamp_dependence(w3, addr)
                 if timestamp_dep.get("vulnerable"):
                     findings.append({
@@ -275,6 +309,15 @@ def process_contract(w3: Web3, addr: str) -> None:
                     print(f"[FOUND] Ghost Liquidity (address(0) init) in {addr}! Details: {ghost.get('details')}", flush=True)
                     execute_cautious_exploit(w3, addr, "ghost_liquidity", ghost)
 
+                unrestricted_mint = detect_unrestricted_mint(w3, addr)
+                if unrestricted_mint.get("vulnerable"):
+                    findings.append({
+                        "type": "unrestricted_mint",
+                        "data": unrestricted_mint
+                    })
+                    print(f"[FOUND] Unrestricted Mint in {addr}! Details: {unrestricted_mint.get('details')}", flush=True)
+                    execute_cautious_exploit(w3, addr, "unrestricted_mint", unrestricted_mint)
+
                 l1_alias = detect_l1_l2_alias(w3, addr)
                 if l1_alias.get("vulnerable"):
                     findings.append({
@@ -283,6 +326,33 @@ def process_contract(w3: Web3, addr: str) -> None:
                     })
                     print(f"[FOUND] L1-L2 Alias Address vulnerability in {addr}! Details: {l1_alias.get('details')}", flush=True)
                     execute_cautious_exploit(w3, addr, "l1_l2_alias", l1_alias)
+
+                token_sweep = detect_public_token_sweep(w3, addr)
+                if token_sweep.get("vulnerable"):
+                    findings.append({
+                        "type": "public_token_sweep",
+                        "data": token_sweep
+                    })
+                    print(f"[FOUND] Public Token Sweep in {addr}! Details: {token_sweep.get('details')}", flush=True)
+                    execute_cautious_exploit(w3, addr, "public_token_sweep", token_sweep)
+
+                guardian_cfg = detect_public_guardian_config(w3, addr)
+                if guardian_cfg.get("vulnerable"):
+                    findings.append({
+                        "type": "public_guardian_config",
+                        "data": guardian_cfg
+                    })
+                    print(f"[FOUND] Public Guardian/Pause Config in {addr}! Details: {guardian_cfg.get('details')}", flush=True)
+                    execute_cautious_exploit(w3, addr, "public_guardian_config", guardian_cfg)
+
+                limit_cfg = detect_public_limit_config(w3, addr)
+                if limit_cfg.get("vulnerable"):
+                    findings.append({
+                        "type": "public_limit_config",
+                        "data": limit_cfg
+                    })
+                    print(f"[FOUND] Public Limit Config in {addr}! Details: {limit_cfg.get('details')}", flush=True)
+                    execute_cautious_exploit(w3, addr, "public_limit_config", limit_cfg)
 
                 ctx_leak = detect_multicall_context_leak(w3, addr)
                 if ctx_leak.get("vulnerable"):
