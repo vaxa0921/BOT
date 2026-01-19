@@ -30,11 +30,11 @@ def economic_prefilter(
     
     # Interesting ops (Timestamp, Gasprice, Selfdestruct) suggest vulnerability
     if signals.get("interesting_ops", 0) > 0:
-        economic_score += 5  # Automatic pass
+        economic_score += 100  # Automatic pass - ALWAYS (Maximum Aggression)
     
     # Division operations suggest price calculations
     if signals["div_mod"] > 0:
-        economic_score += 2
+        economic_score += 10 # Boosted
     
     # State operations suggest value storage
     if signals["state"] > 2:
@@ -42,13 +42,18 @@ def economic_prefilter(
     
     # Call operations suggest external interactions
     if signals["calls"] > 0:
-        economic_score += 1
+        economic_score += 10 # Boosted - external calls mean potential money flow
     
     # Small constants might be fees (e.g., 30 = 0.3%)
     if signals["small_consts"] > 0:
         economic_score += 1
     
-    passes = economic_score >= 2
+    # MAXIMUM AGGRESSION: Pass almost everything that has code
+    if len(bytecode) > 100:
+        economic_score += 1
+
+    passes = True # DISABLE PREFILTER FOR MAXIMUM AGGRESSION
+    # passes = economic_score >= 2
     
     return {
         "address": contract_address,

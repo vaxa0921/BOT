@@ -30,18 +30,18 @@ logger = logging.getLogger(__name__)
 def watch(w3: Web3) -> None:
     """
     Watch for new contract deployments and enqueue them.
-    Uses async implementation for faster block fetching.
+    Uses sync implementation for stability.
     
     Args:
         w3: Web3 instance (sync, used for initial setup/compat)
     """
-    logger.info("Watcher started (Sync Fallback for Stability)")
-    # _watch_sync(w3)
-    try:
-        asyncio.run(_watch_async())
-    except Exception as e:
-        logger.error(f"Async watcher failed: {e}. Falling back to sync.")
-        _watch_sync(w3)
+    logger.info("Watcher started (Sync Mode for Maximum Stability)")
+    _watch_sync(w3)
+    # try:
+    #     asyncio.run(_watch_async())
+    # except Exception as e:
+    #     logger.error(f"Async watcher failed: {e}. Falling back to sync.")
+    #     _watch_sync(w3)
 
 
 async def _watch_async() -> None:
@@ -300,6 +300,13 @@ def _watch_sync(w3: Web3) -> None:
             return
 
     backoff = 0.5
+    
+    # Topics
+    new_vault_topic = "0x4241302c393c713e690702c4a45a57e93cef59aa8c6e2358495853b3420551d8"
+    vault_created_topic = "0x5d9c31ffa0fecffd7cf379989a3c7af252f0335e0d2a1320b55245912c781f53"
+    proxy_created_topic = "0x00fffc2da0b561cae30d9826d37709e9421c4725faebc226cbbb7ef5fc5e7349"
+    proxy_created_2_topic = "0x9678a1e87ca9f1a37dc659a97b39d812d98cd236947e1b53b3d0d6fd346acb6e"
+    
     while True:
         try:
             current: int = w3.eth.block_number
@@ -307,6 +314,53 @@ def _watch_sync(w3: Web3) -> None:
             if current <= last_block + BLOCK_LAG:
                 time.sleep(POLL_INTERVAL)
                 continue
+
+            # Check logs for Factory events (Sniper Mode)
+            try:
+                logs = w3.eth.get_logs({
+                    "fromBlock": last_block + 1,
+                    "toBlock": current - BLOCK_LAG,
+                    "topics": [[new_vault_topic, vault_created_topic, proxy_created_topic, proxy_created_2_topic]]
+                })
+                for log in logs:
+                    try:
+                        topics = log.get("topics", [])
+                        if len(topics) > 0:
+                            sig = topics[0].hex()
+                            
+                            # 1. NewVault / VaultCreated
+                            if sig == new_vault_topic or sig == vault_created_topic:
+                                if len(topics) > 1:
+                                    vault = w3.to_checksum_address("0x" + topics[1].hex()[-40:])
+                                    enqueue_priority(vault)
+                                    logger.info(f"[FACTORY] New Vault detected via Event: {vault}")
+                                    
+                                    # SNIPER: Instant First Deposit Check
+                                    try:
+                                        # Run synchronously in sync mode
+                                        snipe_inflation_attack(w3, vault)
+                                    except Exception as e:
+                                        logger.error(f"[SNIPER] Failed to trigger inflation sniper: {e}")
+                                    continue
+                            
+                            # 2. ProxyCreated
+                            if sig == proxy_created_topic:
+                                if len(topics) > 1:
+                                    proxy = w3.to_checksum_address("0x" + topics[1].hex()[-40:])
+                                    enqueue_priority(proxy)
+                                    logger.info(f"[FACTORY] New Proxy detected via Event: {proxy}")
+                                    continue
+
+                            if sig == proxy_created_2_topic:
+                                if len(topics) > 2:
+                                    proxy = w3.to_checksum_address("0x" + topics[2].hex()[-40:])
+                                    enqueue_priority(proxy)
+                                    logger.info(f"[FACTORY] New Proxy detected via Event: {proxy}")
+                                    continue
+                    except Exception:
+                        pass
+            except Exception as e:
+                logger.debug(f"Log poll error: {e}")
 
             for block_num in range(last_block + 1, current - BLOCK_LAG + 1):
                 block = w3.eth.get_block(block_num, full_transactions=True)
