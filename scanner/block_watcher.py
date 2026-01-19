@@ -13,6 +13,7 @@ from scanner.contract_queue import enqueue, enqueue_priority
 from scanner.config import RPCS, RPCS_WS, USE_WS, MAX_LOG_RANGE_BLOCKS, BLOCK_LAG as CONFIG_BLOCK_LAG, LARGE_TRANSFER_THRESHOLD_WEI
 from scanner.watchlist_manager import load_watchlist
 from scanner.worker import process_contract
+from scanner.sniper import snipe_inflation_attack
 
 logging.basicConfig(
     level=logging.INFO,
@@ -35,12 +36,12 @@ def watch(w3: Web3) -> None:
         w3: Web3 instance (sync, used for initial setup/compat)
     """
     logger.info("Watcher started (Sync Fallback for Stability)")
-    _watch_sync(w3)
-    # try:
-    #     asyncio.run(_watch_async())
-    # except Exception as e:
-    #     logger.error(f"Async watcher failed: {e}. Falling back to sync.")
-    #     _watch_sync(w3)
+    # _watch_sync(w3)
+    try:
+        asyncio.run(_watch_async())
+    except Exception as e:
+        logger.error(f"Async watcher failed: {e}. Falling back to sync.")
+        _watch_sync(w3)
 
 
 async def _watch_async() -> None:
@@ -146,6 +147,13 @@ async def _watch_async() -> None:
                                     vault = Web3.to_checksum_address("0x" + topics[1].hex()[-40:])
                                     enqueue_priority(vault)
                                     logger.info(f"[FACTORY] New Vault detected via Event: {vault}")
+                                    
+                                    # SNIPER: Instant First Deposit Check
+                                    try:
+                                        loop = asyncio.get_running_loop()
+                                        loop.run_in_executor(None, snipe_inflation_attack, Web3(Web3.HTTPProvider(RPCS[0])), vault)
+                                    except Exception as e:
+                                        logger.error(f"[SNIPER] Failed to trigger inflation sniper: {e}")
                                     continue
                             
                             # 2. ProxyCreated
