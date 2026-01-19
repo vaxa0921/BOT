@@ -89,22 +89,13 @@ def prefilter_pass(signals: Dict[str, int]) -> bool:
     if signals.get("calls", 0) > 0 and signals.get("state", 0) > 0:
         return True
 
-    # Weakened prefilter - lower thresholds
-    if signals["arith"] < 1:  # was 3
-        return False
+    # MAXIMUM AGGRESSION MODE:
+    # If there is ANY bytecode, we analyze it.
+    # We rely purely on simulation to determine profitability.
+    if signals.get("total_ops", 0) > 0:
+        return True
 
-    if signals["small_consts"] < 0:  # was 1 - now optional
-        # Still check div_mod ratio if no small consts
-        total_ops = max(signals["total_ops"], 1)
-        if signals["div_mod"] / total_ops < 0.0005:  # was 0.001
-            return False
-
-    # More lenient: just need some arithmetic or division
-    total_ops = max(signals["total_ops"], 1)
-    if signals["div_mod"] == 0 and signals["arith"] < 2:
-        return False
-
-    return True
+    return False
 
 
 def passes_prefilter(bytecode: str) -> bool:

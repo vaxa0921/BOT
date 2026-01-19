@@ -6,7 +6,7 @@ import "forge-std/Test.sol";
 import "forge-std/console.sol";
 
 contract HoneypotTestETH is Test {
-    address victim = 0xb7347330527F543EC1f0272FEB6fB58D0d05F859;
+    address victim = 0x1c71f3D72a3Df885715a2bebfE4563b73526F5e0;
     address attacker = address(0x1337);
     
     function setUp() public {
@@ -77,7 +77,7 @@ contract HoneypotTestETH is Test {
         return;
     
         
-        uint256 amount = 5 ether; // Flash Loan Amount
+        uint256 amount = 20 ether; // Flash Loan Amount
         vm.deal(attacker, amount); 
         console.log("Flash Loan Mode: 20 ETH simulated");
         

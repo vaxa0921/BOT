@@ -702,6 +702,16 @@ def run_honeypot_simulation_eth(victim_address: str, rpc_url: str, w3: Optional[
             "content": base_content.replace("uint256 amount = 20 ether;", "uint256 amount = 0.1 ether;")
         })
         scenarios.append({
+            "label": "0_01_eth",
+            "amount_wei": int(0.01 * 10**18),
+            "content": base_content.replace("uint256 amount = 20 ether;", "uint256 amount = 0.01 ether;")
+        })
+        scenarios.append({
+            "label": "0_001_eth",
+            "amount_wei": int(0.001 * 10**18),
+            "content": base_content.replace("uint256 amount = 20 ether;", "uint256 amount = 0.001 ether;")
+        })
+        scenarios.append({
             "label": "1_wei",
             "amount_wei": 1,
             "content": base_content.replace("uint256 amount = 20 ether;", "uint256 amount = 1 wei;")

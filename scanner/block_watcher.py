@@ -34,13 +34,13 @@ def watch(w3: Web3) -> None:
     Args:
         w3: Web3 instance (sync, used for initial setup/compat)
     """
-    logger.info("Watcher started (Async Optimized)")
-    
-    try:
-        asyncio.run(_watch_async())
-    except Exception as e:
-        logger.error(f"Async watcher failed: {e}. Falling back to sync.")
-        _watch_sync(w3)
+    logger.info("Watcher started (Sync Fallback for Stability)")
+    _watch_sync(w3)
+    # try:
+    #     asyncio.run(_watch_async())
+    # except Exception as e:
+    #     logger.error(f"Async watcher failed: {e}. Falling back to sync.")
+    #     _watch_sync(w3)
 
 
 async def _watch_async() -> None:

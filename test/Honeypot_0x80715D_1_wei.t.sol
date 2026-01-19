@@ -6,11 +6,11 @@ import "forge-std/Test.sol";
 import "forge-std/console.sol";
 
 contract HoneypotTestETH is Test {
-    address victim = 0x88feC94EB9f11376e0Dcb31EA7BAbc278d6035C3;
+    address victim = 0x80715D8303301765c5aBdE6529de84fBE71F3871;
     address attacker = address(0x1337);
     
     function setUp() public {
-        vm.createSelectFork("https://base-mainnet.public.blastapi.io");
+        vm.createSelectFork("https://mainnet.base.org");
         vm.label(victim, "Victim");
         vm.label(attacker, "Attacker");
     }
