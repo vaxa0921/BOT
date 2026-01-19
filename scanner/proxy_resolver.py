@@ -52,9 +52,11 @@ def get_implementation_address(
         elif proxy_type == "minimal":
             # Minimal proxy (clone) - implementation is in bytecode
             code = w3.eth.get_code(proxy_address).hex()
-            if len(code) > 22:  # Has implementation address
-                # Implementation address is typically at position 10-29
-                impl_address = "0x" + code[10:50]
+            if len(code) > 45:  # Has implementation address (min length check)
+                # Implementation address is typically at position 10-29 (bytes) -> 22-62 (hex string with 0x)
+                # EIP-1167: 363d3d373d3d3d363d73<address>5af43d82803e903d91602b57fd5bf3
+                # 0x + 20 chars (10 bytes) = index 22
+                impl_address = "0x" + code[22:62]
                 impl = Web3.to_checksum_address(impl_address)
                 _IMPL_CACHE[key] = impl
                 return impl
