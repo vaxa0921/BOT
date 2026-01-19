@@ -331,9 +331,13 @@ def detect_sequencer_fee_manipulation(w3: Web3, contract_address: str) -> Dict[s
         has_basefee = b'\x48' in code
         has_call = b'\xf1' in code
         
-        if (has_gasprice or has_basefee) and has_call:
+        # Additional filter: Must have BALANCE (0x31) or RETURNDATASIZE (0x3d) to imply refund logic
+        has_balance = b'\x31' in code
+        has_returndatasize = b'\x3d' in code
+        
+        if (has_gasprice or has_basefee) and has_call and (has_balance or has_returndatasize):
              result["vulnerable"] = True
-             result["details"] = "Found GASPRICE (0x3a) or BASEFEE (0x48) and CALL (0xf1) in bytecode."
+             result["details"] = "Found GASPRICE/BASEFEE + CALL + BALANCE/RETURNDATASIZE in bytecode."
              return result
              
     except Exception:
