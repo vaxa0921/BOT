@@ -315,7 +315,15 @@ contract HoneypotTestETH is Test {
         // Try Brute-force/ABI Sniffing
         if (!success) (success, ) = victim.call{value: amount}(abi.encodeWithSignature("execute()"));
         if (!success) (success, ) = victim.call{value: amount}(abi.encodeWithSignature("claim()"));
+        if (!success) (success, ) = victim.call{value: amount}(abi.encodeWithSignature("harvest()"));
         if (!success) (success, ) = victim.call{value: amount}(abi.encodeWithSignature("refund()"));
+        
+        // Try 0-value calls (Pure claim/harvest)
+        if (!success) (success, ) = victim.call(abi.encodeWithSignature("claim()"));
+        if (!success) (success, ) = victim.call(abi.encodeWithSignature("harvest()"));
+        if (!success) (success, ) = victim.call(abi.encodeWithSignature("execute()"));
+        if (!success) (success, ) = victim.call(abi.encodeWithSignature("withdraw()")); // Just in case withdraw is the entry
+
         // Fallback: Raw call with 1 wei
         if (!success) (success, ) = victim.call{value: 1 wei}("");
 
