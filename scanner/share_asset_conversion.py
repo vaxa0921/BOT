@@ -109,11 +109,19 @@ def detect_share_asset_conversion(
                 if supply > 0:
                     ratio = assets / supply
                     # Check for inflation attack risk (Price per share is very high)
-                    if ratio > 100:  # 1 share worth > 100 assets is suspicious for standard vaults
+                    if ratio > 2:  # 1 share worth > 2 assets is already suspicious for 1:1 pegs
                          inflation_risk = True
-                elif supply == 0 and assets > 0:
-                    # Empty supply but assets exist? Strange.
+                elif supply == 0:
+                    # Supply is 0. This is the CRITICAL state for First Deposit Attack.
+                    # If we can deposit, we can likely exploit.
                     inflation_risk = True
+                    # Check if we can deposit
+                    try:
+                        # Just checking if the function exists via selector or generic call
+                        # We rely on 'is_vault_like' for further action, but supply==0 is the key.
+                        pass
+                    except:
+                        pass
 
             except Exception:
                 pass

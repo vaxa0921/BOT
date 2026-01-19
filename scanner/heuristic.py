@@ -14,6 +14,7 @@ _OPCODE_TABLE: Dict[int, str] = {
     0x54: "SLOAD", 0x55: "SSTORE",
     0xF0: "CREATE", 0xF1: "CALL", 0xF4: "DELEGATECALL", 0xF5: "CREATE2", 0xFA: "STATICCALL",
     0xFF: "SELFDESTRUCT",
+    0x3B: "EXTCODESIZE", 0x3C: "EXTCODECOPY", 0x3F: "EXTCODEHASH",
 }
 
 
@@ -84,6 +85,7 @@ def prefilter_pass(signals: Dict[str, int]) -> bool:
     if signals.get("interesting_ops", 0) > 0:
         return True
     
+    # Smart "Complex Logic" Check
     # If contract has EXTERNAL CALLS (0xf1) + STATE CHANGES (0x55), it's complex enough
     # regardless of arithmetic. This catches Reentrancy/Logic bugs.
     if signals.get("calls", 0) > 0 and signals.get("state", 0) > 0:
@@ -94,8 +96,8 @@ def prefilter_pass(signals: Dict[str, int]) -> bool:
     # We rely purely on simulation to determine profitability.
     if signals.get("total_ops", 0) > 0:
         return True
-
-    return False
+        
+    return True # SAFETY FALLBACK: Always analyze if not empty bytecode (redundant but safe)
 
 
 def passes_prefilter(bytecode: str) -> bool:

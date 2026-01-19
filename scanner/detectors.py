@@ -335,9 +335,12 @@ def detect_sequencer_fee_manipulation(w3: Web3, contract_address: str) -> Dict[s
         has_balance = b'\x31' in code
         has_returndatasize = b'\x3d' in code
         
-        if (has_gasprice or has_basefee) and has_call and (has_balance or has_returndatasize):
+        # 0x47 is SELFBALANCE (cheaper than BALANCE(address(this)))
+        has_selfbalance = b'\x47' in code
+
+        if (has_gasprice or has_basefee) and has_call and (has_balance or has_returndatasize or has_selfbalance):
              result["vulnerable"] = True
-             result["details"] = "Found GASPRICE/BASEFEE + CALL + BALANCE/RETURNDATASIZE in bytecode."
+             result["details"] = "Found GASPRICE/BASEFEE + CALL + BALANCE/RETURNDATASIZE/SELFBALANCE in bytecode."
              return result
              
     except Exception:
@@ -365,14 +368,15 @@ def detect_self_destruct_reincarnation(w3: Web3, contract_address: str) -> Dict[
             return result
 
         # Check for known selectors to ensure it's likely exploitable/public
-        # kill, destroy, suicide, close, die, shutdown
+        # kill, destroy, suicide, close, die, shutdown, harvest
         known_selectors = [
             bytes.fromhex("41c0e1b5"), # kill()
             bytes.fromhex("83197ef0"), # destroy()
             bytes.fromhex("cbf0b0c0"), # suicide()
             bytes.fromhex("43d726d6"), # close()
             bytes.fromhex("35f46994"), # die()
-            bytes.fromhex("0c55699c")  # shutdown()
+            bytes.fromhex("0c55699c"), # shutdown()
+            bytes.fromhex("4641257d"), # harvest() (sometimes used for draining)
         ]
         
         has_selector = any(sel in code for sel in known_selectors)

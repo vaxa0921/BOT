@@ -149,6 +149,16 @@ ADAPTIVE_GAS_MULTIPLIER: float = 1.5
 
 LARGE_TRANSFER_THRESHOLD_WEI: int = int(0.5 * 10**18)
 
+# System Contracts Blacklist (Known secure contracts to skip)
+SYSTEM_CONTRACTS_BLACKLIST = {
+    "0x0000000000001ff3684f28c67538d4d072c22734",  # 0x Allowance Holder
+    "0x6a000f20005980200259b80c5102003040001068",  # ParaSwap Augustus V6.2
+    "0x5ff137d4b0fdcd49dca30c7cf57e578a026d2789",  # ERC-4337 EntryPoint v0.6
+    "0x0000000071727de22e5e9d8baf0edac6f37da032",  # ERC-4337 EntryPoint v0.7
+    "0x4200000000000000000000000000000000000015",  # Optimism L1Block
+    "0x4200000000000000000000000000000000000010",  # Optimism L2CrossDomainMessenger
+}
+
 # Key tokens for pricing (Base)
 KEY_TOKENS: List[str] = [
     "0x4200000000000000000000000000000000000006",  # WETH

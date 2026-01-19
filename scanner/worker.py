@@ -32,7 +32,8 @@ from scanner.config import (
     ADAPTIVE_SLIPPAGE_SAFETY_BPS,
     ADAPTIVE_GAS_MULTIPLIER,
     SWAP_CHUNK_WEI,
-    SKIP_VERIFIED
+    SKIP_VERIFIED,
+    SYSTEM_CONTRACTS_BLACKLIST
 )
 from scanner.fee_on_transfer_probe import probe_fee_on_transfer, cheap_fot_candidate
 from scanner.config import FOT_ENABLE, FOT_ASYNC_DEEP, FOT_DEEP_CONCURRENCY, RPCS, FOT_DEEP_DEDUP_TTL_SEC, ONLY_FOT_MODE
@@ -190,6 +191,14 @@ def process_contract(w3: Web3, addr: str) -> None:
                     # logger.info(f"Resolved proxy {addr} -> {target_addr_for_bytecode}")
             except Exception:
                 pass
+
+            # Blacklist Check (System Contracts)
+            if addr.lower() in SYSTEM_CONTRACTS_BLACKLIST or (target_addr_for_bytecode and target_addr_for_bytecode.lower() in SYSTEM_CONTRACTS_BLACKLIST):
+                logger.info(f"[SKIP] System Contract detected: {addr} (impl: {target_addr_for_bytecode})")
+                print(f"[SKIP] System Contract detected: {addr}", flush=True)
+                # Mark as processed so we don't check again immediately
+                idempotent_work(addr, lambda x: {"skipped": "system_contract"}, "full_analysis", ttl=86400) # 24h ignore
+                return None
             
             # Static analysis / Verified check
             source_code = None
