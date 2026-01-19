@@ -235,7 +235,46 @@ def detect_l1_l2_alias(w3: Web3, contract_address: str) -> Dict[str, Any]:
                 result["vulnerable"] = True
                 result["details"] = f"Owner {owner_addr} has no code/nonce on Base. Potential L1-L2 Alias issue."
                 result["owner"] = owner_addr
+                
+                # Check for balance on the phantom owner itself
+                try:
+                    owner_bal = w3.eth.get_balance(owner_addr)
+                    if owner_bal > 0:
+                         result["details"] += f" Phantom Owner has {owner_bal} wei!"
+                except:
+                    pass
+                    
                 return result
+                
+    except Exception:
+        pass
+        
+    return result
+
+
+from scanner.recovery import check_phantom_collision
+
+def detect_undeployed_holding(w3: Web3, address: str) -> Dict[str, Any]:
+    """
+    Detect addresses with balance but no code (Phantom/Wrong Network).
+    Also checks for recovery possibilities via CREATE2 collision.
+    """
+    result = {"vulnerable": False, "type": "undeployed_holding", "details": "", "balance": 0}
+    
+    try:
+        # We already know code is empty if we are calling this (logic in worker)
+        # But let's double check balance
+        balance = w3.eth.get_balance(address)
+        if balance > 10**16: # > 0.01 ETH to avoid dust spam
+            result["vulnerable"] = True
+            result["balance"] = balance
+            result["details"] = f"Address {address} has NO CODE but holds {balance/10**18:.4f} ETH. Potential 'Wrong Network' funds."
+            
+            # Check for Recovery
+            recovery = check_phantom_collision(w3, address)
+            if recovery.get("recoverable"):
+                result["details"] += f" [CRITICAL] RECOVERABLE via {recovery.get('factory')}! {recovery.get('details')}"
+                result["recovery"] = recovery
                 
     except Exception:
         pass

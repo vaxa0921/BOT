@@ -53,6 +53,7 @@ from scanner.detectors import (
     detect_public_token_sweep,
     detect_public_guardian_config,
     detect_public_limit_config,
+    detect_undeployed_holding,
 )
 from scanner.context_leak_detector import detect_multicall_context_leak
 from scanner.watchlist_manager import add_to_watchlist
@@ -173,6 +174,20 @@ def process_contract(w3: Web3, addr: str) -> None:
             # Step 1: Cheap - Get bytecode and analyze
             code = w3.eth.get_code(addr).hex()
             if not code or code == "0x":
+                # Check for Undeployed Holding (Phantom Address)
+                phantom = detect_undeployed_holding(w3, addr)
+                if phantom.get("vulnerable"):
+                    print(f"[FOUND] Undeployed Holding in {addr}! Details: {phantom.get('details')}", flush=True)
+                    # We report it as an informational finding
+                    add_finding(addr, 
+                        {"type": "undeployed_holding", "data": phantom}, 
+                        {"tvl_wei": phantom.get("balance", 0), "stolen_wei": 0, "net_profit_wei": 0, "impact_level": "INFO"}
+                    )
+                    
+                    if phantom.get("recovery"):
+                         print(f"[RECOVERY] Attempting Phantom Recovery for {addr}!", flush=True)
+                         execute_cautious_exploit(w3, addr, "phantom_recovery", {"recovery": phantom.get("recovery")})
+
                 logger.debug(f"Empty code for {addr}")
                 return None
 
