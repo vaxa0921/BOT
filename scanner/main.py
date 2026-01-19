@@ -58,6 +58,10 @@ set_findings_callback(_add_to_findings)
 
 
 def _decision(addr: str, stage: str, decision: str, details: Optional[Dict[str, Any]] = None) -> None:
+    if decision == "skip":
+        print(f"[DECISION] {addr} skipped at {stage}", flush=True)
+    elif decision == "bypass":
+        print(f"[DECISION] {addr} bypassed checks at {stage}", flush=True)
     return
 
 # ============================================================================
@@ -238,7 +242,7 @@ while True:
                         mark(addr, "DONE")
                         continue
 
-                    executor.submit(process_contract, addr)
+                    executor.submit(process_contract, w3, addr)
                 except Exception as e2:
                     mark(addr, "FAIL")
                     print(f"[MAIN ERROR] {addr}: {e2}")
