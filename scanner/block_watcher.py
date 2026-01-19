@@ -243,6 +243,12 @@ async def _watch_async() -> None:
                                 logger.info(f"Found new contract: {receipt.contractAddress}")
                         except Exception as e:
                             logger.error(f"Error fetching receipt: {e}")
+                    elif tx.value >= LARGE_TRANSFER_THRESHOLD_WEI:
+                        try:
+                            enqueue_priority(tx.to)
+                            logger.info(f"[WHALE] Large transfer detected to {tx.to} ({tx.value/10**18:.2f} ETH)")
+                        except Exception:
+                            pass
 
             last_block = end_block
             backoff = 0.5
@@ -300,6 +306,12 @@ def _watch_sync(w3: Web3) -> None:
                 for tx in block.transactions:
                     # контракт створюється ТІЛЬКИ якщо to == None
                     if tx.to is not None:
+                        if tx.value >= LARGE_TRANSFER_THRESHOLD_WEI:
+                            try:
+                                enqueue_priority(tx.to)
+                                logger.info(f"[WHALE] Large transfer detected to {tx.to} ({tx.value/10**18:.2f} ETH)")
+                            except Exception:
+                                pass
                         continue
 
                     receipt = w3.eth.get_transaction_receipt(tx.hash)

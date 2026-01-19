@@ -54,9 +54,11 @@ def enqueue_priority(address: str) -> None:
     address = address.lower()
 
     with _LOCK:
-        if address in _SEEN:
-            return
-        _SEEN.add(address)
+        # Priority items bypass the _SEEN check to allow re-scanning of active contracts
+        # deduplication is handled by the worker's idempotent TTL logic.
+        if address not in _SEEN:
+            _SEEN.add(address)
+        
         _PRIORITY_QUEUE.append(address)
 
 

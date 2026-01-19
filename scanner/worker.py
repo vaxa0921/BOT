@@ -560,7 +560,7 @@ def process_contract(w3: Web3, addr: str) -> None:
             return None
     
     # Execute idempotently
-    idempotent_work(addr, _process, "full_analysis")
+    idempotent_work(addr, _process, "full_analysis", ttl=3600)
 
 
 def _scan_source_for_patterns(source: str) -> Dict[str, Any]:
