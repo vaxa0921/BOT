@@ -10,8 +10,10 @@ CONST_SMALL_THRESHOLD: int = 1_000
 _OPCODE_TABLE: Dict[int, str] = {
     0x01: "ADD", 0x02: "MUL", 0x03: "SUB",
     0x04: "DIV", 0x05: "SDIV", 0x06: "MOD", 0x07: "SMOD",
+    0x3a: "GASPRICE", 0x42: "TIMESTAMP", 0x48: "BASEFEE",
     0x54: "SLOAD", 0x55: "SSTORE",
-    0xF1: "CALL", 0xF4: "DELEGATECALL", 0xFA: "STATICCALL",
+    0xF0: "CREATE", 0xF1: "CALL", 0xF4: "DELEGATECALL", 0xF5: "CREATE2", 0xFA: "STATICCALL",
+    0xFF: "SELFDESTRUCT",
 }
 
 
@@ -36,6 +38,7 @@ def analyze_bytecode(bytecode: str) -> Dict[str, int]:
         "state": 0,
         "calls": 0,
         "small_consts": 0,
+        "interesting_ops": 0,
         "total_ops": len(ops),
     }
 
@@ -48,6 +51,8 @@ def analyze_bytecode(bytecode: str) -> Dict[str, int]:
             counts["state"] += 1
         if op in FLOW_OPS:
             counts["calls"] += 1
+        if op in {"TIMESTAMP", "GASPRICE", "BASEFEE", "SELFDESTRUCT", "DELEGATECALL", "CREATE", "CREATE2"}:
+            counts["interesting_ops"] += 1
         if op.startswith("PUSH") and arg:
             try:
                 value = int(arg, 16)
@@ -71,6 +76,10 @@ def prefilter_pass(signals: Dict[str, int]) -> bool:
     Returns:
         True if contract should be analyzed further
     """
+    # Bypass if interesting opcodes detected
+    if signals.get("interesting_ops", 0) > 0:
+        return True
+
     # Weakened prefilter - lower thresholds
     if signals["arith"] < 1:  # was 3
         return False

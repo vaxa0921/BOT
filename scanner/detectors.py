@@ -127,7 +127,7 @@ def detect_uninitialized_reward(w3: Web3, contract_address: str) -> Dict[str, An
 def detect_timestamp_dependence(w3: Web3, contract_address: str) -> Dict[str, Any]:
     """
     Detect Sequencer Path Independence / Timestamp Mismatch vulnerability.
-    Checks for TIMESTAMP (0x42) usage in contracts with withdraw functions.
+    Checks for TIMESTAMP (0x42) usage in contracts with withdraw/execute functions.
     """
     result = {"vulnerable": False, "type": "timestamp_dependence", "details": ""}
     try:
@@ -138,14 +138,25 @@ def detect_timestamp_dependence(w3: Web3, contract_address: str) -> Dict[str, An
         # TIMESTAMP opcode is 0x42
         has_timestamp = b'\x42' in code
         
-        # Check for withdraw selectors to narrow down to DeFi/Locking
+        # Check for withdraw/execute selectors
         # withdraw(uint256) -> 2e1a7d4d
         # withdraw() -> 3ccfd60b
-        has_withdraw = (b'\x2e\x1a\x7d\x4d' in code) or (b'\x3c\xcf\xd6\x0b' in code)
+        # execute() -> 61461954
+        # claim() -> 4e71d92d
+        # refund() -> 590e1ae3
+        withdraw_sigs = [
+            b'\x2e\x1a\x7d\x4d',
+            b'\x3c\xcf\xd6\x0b',
+            b'\x61\x46\x19\x54',
+            b'\x4e\x71\xd9\x2d',
+            b'\x59\x0e\x1a\xe3'
+        ]
+        
+        has_withdraw = any(sig in code for sig in withdraw_sigs)
         
         if has_timestamp and has_withdraw:
             result["vulnerable"] = True
-            result["details"] = "Found TIMESTAMP (0x42) and withdraw function. Potential Flashblock/Timestamp vulnerability."
+            result["details"] = "Found TIMESTAMP (0x42) and withdraw/execute function. Potential Flashblock/Timestamp vulnerability."
             return result
             
     except Exception:
@@ -307,7 +318,7 @@ def detect_public_payout_config(w3: Web3, contract_address: str) -> Dict[str, An
 def detect_sequencer_fee_manipulation(w3: Web3, contract_address: str) -> Dict[str, Any]:
     """
     Detect Sequencer Fee Manipulation vulnerability.
-    Checks for GASPRICE (0x3a) usage combined with CALL (0xf1) in bytecode.
+    Checks for GASPRICE (0x3a) or BASEFEE (0x48) usage combined with CALL (0xf1) in bytecode.
     """
     result = {"vulnerable": False, "type": "sequencer_fee", "details": ""}
     try:
@@ -315,13 +326,14 @@ def detect_sequencer_fee_manipulation(w3: Web3, contract_address: str) -> Dict[s
         if not code:
             return result
         
-        # 0x3a is GASPRICE, 0xf1 is CALL
+        # 0x3a is GASPRICE, 0x48 is BASEFEE, 0xf1 is CALL
         has_gasprice = b'\x3a' in code
+        has_basefee = b'\x48' in code
         has_call = b'\xf1' in code
         
-        if has_gasprice and has_call:
+        if (has_gasprice or has_basefee) and has_call:
              result["vulnerable"] = True
-             result["details"] = "Found GASPRICE (0x3a) and CALL (0xf1) in bytecode."
+             result["details"] = "Found GASPRICE (0x3a) or BASEFEE (0x48) and CALL (0xf1) in bytecode."
              return result
              
     except Exception:
@@ -331,8 +343,8 @@ def detect_sequencer_fee_manipulation(w3: Web3, contract_address: str) -> Dict[s
 
 def detect_self_destruct_reincarnation(w3: Web3, contract_address: str) -> Dict[str, Any]:
     """
-    Detect Self-Destruct Reincarnation vulnerability.
-    Checks for CREATE2 (0xf5) and SELFDESTRUCT (0xff) or DELEGATECALL (0xf4).
+    Detect Self-Destruct vulnerability.
+    Checks for SELFDESTRUCT (0xff). If CREATE2 (0xf5) is present, flags as Reincarnation.
     """
     result = {"vulnerable": False, "type": "self_destruct_reincarnation", "details": ""}
     try:
@@ -345,12 +357,15 @@ def detect_self_destruct_reincarnation(w3: Web3, contract_address: str) -> Dict[
         has_selfdestruct = b'\xff' in code
         has_delegatecall = b'\xf4' in code
         
-        # Logic: Factory using CREATE2 (re-deploy capability)
-        # Or Contract with SELFDESTRUCT (can be destroyed to clear nonce/code)
-        
-        if has_create2 and (has_selfdestruct or has_delegatecall):
+        # Logic: If SELFDESTRUCT is present, it's potentially interesting.
+        if has_selfdestruct:
             result["vulnerable"] = True
-            result["details"] = "Found CREATE2 with SELFDESTRUCT/DELEGATECALL. Potential Reincarnation."
+            if has_create2:
+                result["details"] = "Found SELFDESTRUCT and CREATE2. Potential Reincarnation factory."
+            elif has_delegatecall:
+                result["details"] = "Found SELFDESTRUCT and DELEGATECALL. Potential Unsafe Delegatecall."
+            else:
+                result["details"] = "Found SELFDESTRUCT (0xff). Potential Unprotected Self-Destruct."
             return result
             
     except Exception:

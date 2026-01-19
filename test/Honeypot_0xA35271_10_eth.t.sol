@@ -6,11 +6,11 @@ import "forge-std/Test.sol";
 import "forge-std/console.sol";
 
 contract HoneypotTestETH is Test {
-    address victim = 0x2917956eFF0B5eaF030abDB4EF4296DF775009cA;
+    address victim = 0xA35271B23bd54f5c7baEAB780949dAb76AEc28A1;
     address attacker = address(0x1337);
     
     function setUp() public {
-        vm.createSelectFork("https://1rpc.io/base");
+        vm.createSelectFork("https://mainnet.base.org");
         vm.label(victim, "Victim");
         vm.label(attacker, "Attacker");
     }
@@ -29,8 +29,9 @@ contract HoneypotTestETH is Test {
         vm.deal(attacker, 20 ether);
         uint256 sfBalBefore = attacker.balance;
         
-        // 1. Aggressive Gas Price Simulation (BaseFee * 100)
-        vm.txGasPrice(block.basefee * 100); 
+        // 1. Aggressive Gas Price Simulation
+        // Force high gas price to trigger potential refund logic
+        vm.txGasPrice(1000 gwei); 
         
         bool sfSuccess;
         // Attempt standard execute
@@ -76,7 +77,7 @@ contract HoneypotTestETH is Test {
         return;
     
         
-        uint256 amount = 0.1 ether; // Flash Loan Amount
+        uint256 amount = 10 ether; // Flash Loan Amount
         vm.deal(attacker, amount); 
         console.log("Flash Loan Mode: 20 ETH simulated");
         

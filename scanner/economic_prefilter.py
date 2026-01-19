@@ -28,6 +28,10 @@ def economic_prefilter(
     if signals["arith"] > 2:
         economic_score += 2
     
+    # Interesting ops (Timestamp, Gasprice, Selfdestruct) suggest vulnerability
+    if signals.get("interesting_ops", 0) > 0:
+        economic_score += 5  # Automatic pass
+    
     # Division operations suggest price calculations
     if signals["div_mod"] > 0:
         economic_score += 2

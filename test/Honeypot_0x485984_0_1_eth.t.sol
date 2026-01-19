@@ -6,11 +6,11 @@ import "forge-std/Test.sol";
 import "forge-std/console.sol";
 
 contract HoneypotTestETH is Test {
-    address victim = 0xdf5ACC616cD3ea9556EC340a11B54859a393ebBB;
+    address victim = 0x4859845540F63503FbDa30be31E259056b2b3e84;
     address attacker = address(0x1337);
     
     function setUp() public {
-        vm.createSelectFork("https://base-mainnet.public.blastapi.io");
+        vm.createSelectFork("https://base.publicnode.com");
         vm.label(victim, "Victim");
         vm.label(attacker, "Attacker");
     }
@@ -76,7 +76,7 @@ contract HoneypotTestETH is Test {
         return;
     
         
-        uint256 amount = 1 wei; // Flash Loan Amount
+        uint256 amount = 0.1 ether; // Flash Loan Amount
         vm.deal(attacker, amount); 
         console.log("Flash Loan Mode: 20 ETH simulated");
         
