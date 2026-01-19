@@ -344,7 +344,8 @@ def detect_sequencer_fee_manipulation(w3: Web3, contract_address: str) -> Dict[s
 def detect_self_destruct_reincarnation(w3: Web3, contract_address: str) -> Dict[str, Any]:
     """
     Detect Self-Destruct vulnerability.
-    Checks for SELFDESTRUCT (0xff). If CREATE2 (0xf5) is present, flags as Reincarnation.
+    Checks for SELFDESTRUCT (0xff) AND presence of known public selectors.
+    If CREATE2 (0xf5) is also present, flags as Reincarnation.
     """
     result = {"vulnerable": False, "type": "self_destruct_reincarnation", "details": ""}
     try:
@@ -355,22 +356,66 @@ def detect_self_destruct_reincarnation(w3: Web3, contract_address: str) -> Dict[
         # 0xf5 is CREATE2, 0xff is SELFDESTRUCT, 0xf4 is DELEGATECALL
         has_create2 = b'\xf5' in code
         has_selfdestruct = b'\xff' in code
-        has_delegatecall = b'\xf4' in code
         
-        # Logic: If SELFDESTRUCT is present, it's potentially interesting.
-        if has_selfdestruct:
+        if not has_selfdestruct:
+            return result
+
+        # Check for known selectors to ensure it's likely exploitable/public
+        # kill, destroy, suicide, close, die, shutdown
+        known_selectors = [
+            bytes.fromhex("41c0e1b5"), # kill()
+            bytes.fromhex("83197ef0"), # destroy()
+            bytes.fromhex("cbf0b0c0"), # suicide()
+            bytes.fromhex("43d726d6"), # close()
+            bytes.fromhex("35f46994"), # die()
+            bytes.fromhex("0c55699c")  # shutdown()
+        ]
+        
+        has_selector = any(sel in code for sel in known_selectors)
+        
+        if not has_selector:
+            # If no known selector found, it's likely internal or protected or unknown name.
+            # Skip to reduce false positives/unexploitable noise.
+            return result
+
+        if has_create2:
             result["vulnerable"] = True
-            if has_create2:
-                result["details"] = "Found SELFDESTRUCT and CREATE2. Potential Reincarnation factory."
-            elif has_delegatecall:
-                result["details"] = "Found SELFDESTRUCT and DELEGATECALL. Potential Unsafe Delegatecall."
-            else:
-                result["details"] = "Found SELFDESTRUCT (0xff). Potential Unprotected Self-Destruct."
+            result["details"] = "Found SELFDESTRUCT and CREATE2 with known selector. Potential Reincarnation factory."
             return result
             
+        # Also flag if just SELFDESTRUCT with known selector (simple self-destruct)
+        result["vulnerable"] = True
+        result["details"] = "Found SELFDESTRUCT with known selector."
+        return result
+
     except Exception:
         pass
         
+    return result
+
+def detect_unprotected_initialize(w3: Web3, contract_address: str) -> Dict[str, Any]:
+    """
+    Detects if a contract has an 'initialize' function that is public and uncalled.
+    (Simple static check for selector presence, dynamic check via simulation required later).
+    Selector: initialize() -> 0x8129fc1c
+    """
+    result = {"vulnerable": False, "type": "unprotected_initialize", "details": ""}
+    try:
+        code = w3.eth.get_code(contract_address)
+        if not code:
+            return result
+            
+        # initialize() selector
+        if bytes.fromhex("8129fc1c") in code:
+             # Just a hint for the simulator to try calling it
+             # We mark it as 'potential' so the simulator picks it up
+             # The simulator will determine if it's actually callable/profitable.
+             # For now, we don't flag it as vulnerable to avoid spam, 
+             # but we could return a specific type to trigger a custom simulation.
+             pass
+
+    except Exception:
+        pass
     return result
 
 

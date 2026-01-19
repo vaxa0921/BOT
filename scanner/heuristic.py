@@ -76,8 +76,17 @@ def prefilter_pass(signals: Dict[str, int]) -> bool:
     Returns:
         True if contract should be analyzed further
     """
-    # Bypass if interesting opcodes detected
+    # Smart "Interesting" Opcodes (Risk Scoring)
+    # 0xf4: DELEGATECALL (Hidden logic/Proxy)
+    # 0xff: SELFDESTRUCT (Vulnerability/Rugpull)
+    # 0xf1: CALL (Fund movement)
+    # 0x55: SSTORE (State change)
     if signals.get("interesting_ops", 0) > 0:
+        return True
+    
+    # If contract has EXTERNAL CALLS (0xf1) + STATE CHANGES (0x55), it's complex enough
+    # regardless of arithmetic. This catches Reentrancy/Logic bugs.
+    if signals.get("calls", 0) > 0 and signals.get("state", 0) > 0:
         return True
 
     # Weakened prefilter - lower thresholds

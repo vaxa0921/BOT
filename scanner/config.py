@@ -128,7 +128,20 @@ SKIP_VERIFIED: bool = os.getenv("SKIP_VERIFIED", "0").lower() in ("1", "true", "
 USE_FLASHLOAN: bool = True
 
 # Profit guardrails
-MIN_NET_PROFIT_WEI: int = int(0.005 * 10**18)
+# Read MIN_PROFIT_USD from .env (default 0.50), handling comments
+_min_profit_raw = os.getenv("MIN_PROFIT_USD", "0.50").split("#")[0].strip()
+try:
+    _min_profit_usd = float(_min_profit_raw)
+except ValueError:
+    _min_profit_usd = 0.50
+
+# Explicitly export for other modules
+MIN_NET_PROFIT_USD = _min_profit_usd
+
+# Assume ETH price ~$3000 for config conversion
+_eth_price_usd = 3000.0
+MIN_NET_PROFIT_WEI: int = int((_min_profit_usd / _eth_price_usd) * 10**18)
+
 ADAPTIVE_PROFIT_ENABLE: bool = True
 ADAPTIVE_BASE_MIN_WEI: int = MIN_NET_PROFIT_WEI
 ADAPTIVE_SLIPPAGE_SAFETY_BPS: int = 300

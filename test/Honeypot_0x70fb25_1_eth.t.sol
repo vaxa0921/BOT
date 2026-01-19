@@ -6,7 +6,7 @@ import "forge-std/Test.sol";
 import "forge-std/console.sol";
 
 contract HoneypotTestETH is Test {
-    address victim = 0xeb940f83DB5DF1e981FF27948ef78812a2C10816;
+    address victim = 0x70fb25BAA0F637Ab9156BF233FB2d60a97F07c42;
     address attacker = address(0x1337);
     
     function setUp() public {

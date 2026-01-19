@@ -57,6 +57,13 @@ async def _watch_async() -> None:
     pair_topic = Web3.keccak(text="PairCreated(address,address,address,uint256)").hex()
     pool_topic = Web3.keccak(text="PoolCreated(address,address,uint24,int24,address)").hex()
     mint_topic = Web3.keccak(text="Transfer(address,address,uint256)").hex()
+    
+    # Factory Topics for Vaults/Proxies
+    new_vault_topic = "0x4241302c393c713e690702c4a45a57e93cef59aa8c6e2358495853b3420551d8" # NewVault(address,address)
+    vault_created_topic = "0x5d9c31ffa0fecffd7cf379989a3c7af252f0335e0d2a1320b55245912c781f53" # VaultCreated(address,address)
+    proxy_created_topic = "0x00fffc2da0b561cae30d9826d37709e9421c4725faebc226cbbb7ef5fc5e7349" # ProxyCreated(address)
+    proxy_created_2_topic = "0x9678a1e87ca9f1a37dc659a97b39d812d98cd236947e1b53b3d0d6fd346acb6e" # ProxyCreated(address,address)
+
     zero_topic = "0x0000000000000000000000000000000000000000000000000000000000000000"
     
     # Cache watchlist
@@ -122,48 +129,75 @@ async def _watch_async() -> None:
                 logs = await async_w3.eth.get_logs({
                     "fromBlock": start_block,
                     "toBlock": end_block,
-                    "topics": [[pair_topic, pool_topic, mint_topic]]
+                    "topics": [[pair_topic, pool_topic, mint_topic, new_vault_topic, vault_created_topic, proxy_created_topic, proxy_created_2_topic]]
                 })
                 for log in logs:
                     addr_fields = []
                     
-                    # Mint detection: Transfer(from=0, to=X, val)
                     try:
                         topics = log.get("topics", [])
-                        if len(topics) > 0 and topics[0].hex() == mint_topic:
-                            # topic1 is from, topic2 is to
-                            if len(topics) > 2:
-                                receiver = Web3.to_checksum_address("0x" + topics[2].hex()[-40:])
-                                
-                                # Check Watchlist Sniper
-                                if receiver.lower() in watchlist_addrs:
-                                    logger.warning(f"[SNIPER] Watchlist target {receiver} received funds! Triggering exploit...")
-                                    try:
-                                        loop = asyncio.get_running_loop()
-                                        loop.run_in_executor(None, process_contract, Web3(Web3.HTTPProvider(RPCS[0])), receiver)
-                                    except Exception as e:
-                                        logger.error(f"[SNIPER] Failed to trigger worker: {e}")
-
-                                # Check for Mint (from=0)
-                                if topics[1].hex() == zero_topic:
-                                    enqueue_priority(receiver)
-                                    # logger.info(f"[MINT] Mint detected to {receiver}")
+                        if len(topics) > 0:
+                            sig = topics[0].hex()
+                            
+                            # 1. NewVault / VaultCreated
+                            if sig == new_vault_topic or sig == vault_created_topic:
+                                # usually vault is topic 1
+                                if len(topics) > 1:
+                                    vault = Web3.to_checksum_address("0x" + topics[1].hex()[-40:])
+                                    enqueue_priority(vault)
+                                    logger.info(f"[FACTORY] New Vault detected via Event: {vault}")
                                     continue
-                                
-                                # Check for Large Transfer
-                                data_hex = log.get("data", "0x")
-                                if data_hex and data_hex != "0x":
-                                    try:
-                                        val = int(data_hex, 16)
-                                        if val >= LARGE_TRANSFER_THRESHOLD_WEI:
-                                            receiver = Web3.to_checksum_address("0x" + topics[2].hex()[-40:])
-                                            enqueue_priority(receiver)
-                                            # logger.info(f"[TRANSFER] Large transfer to {receiver}")
-                                            continue
-                                    except Exception:
-                                        pass
+                            
+                            # 2. ProxyCreated
+                            if sig == proxy_created_topic: # ProxyCreated(address proxy)
+                                if len(topics) > 1:
+                                    proxy = Web3.to_checksum_address("0x" + topics[1].hex()[-40:])
+                                    enqueue_priority(proxy)
+                                    logger.info(f"[FACTORY] New Proxy detected via Event: {proxy}")
+                                    continue
 
-                            continue # Skip standard pair logic for mints/transfers
+                            if sig == proxy_created_2_topic: # ProxyCreated(address impl, address proxy)
+                                if len(topics) > 2:
+                                    proxy = Web3.to_checksum_address("0x" + topics[2].hex()[-40:])
+                                    enqueue_priority(proxy)
+                                    logger.info(f"[FACTORY] New Proxy detected via Event: {proxy}")
+                                    continue
+
+                            # 3. Mint detection: Transfer(from=0, to=X, val)
+                            if sig == mint_topic:
+                                # topic1 is from, topic2 is to
+                                if len(topics) > 2:
+                                    receiver = Web3.to_checksum_address("0x" + topics[2].hex()[-40:])
+                                    
+                                    # Check Watchlist Sniper
+                                    if receiver.lower() in watchlist_addrs:
+                                        logger.warning(f"[SNIPER] Watchlist target {receiver} received funds! Triggering exploit...")
+                                        try:
+                                            loop = asyncio.get_running_loop()
+                                            loop.run_in_executor(None, process_contract, Web3(Web3.HTTPProvider(RPCS[0])), receiver)
+                                        except Exception as e:
+                                            logger.error(f"[SNIPER] Failed to trigger worker: {e}")
+
+                                    # Check for Mint (from=0)
+                                    if topics[1].hex() == zero_topic:
+                                        enqueue_priority(receiver)
+                                        # logger.info(f"[MINT] Mint detected to {receiver}")
+                                        continue
+                                    
+                                    # Check for Large Transfer
+                                    data_hex = log.get("data", "0x")
+                                    if data_hex and data_hex != "0x":
+                                        try:
+                                            val = int(data_hex, 16)
+                                            if val >= LARGE_TRANSFER_THRESHOLD_WEI:
+                                                receiver = Web3.to_checksum_address("0x" + topics[2].hex()[-40:])
+                                                enqueue_priority(receiver)
+                                                # logger.info(f"[TRANSFER] Large transfer to {receiver}")
+                                                continue
+                                        except Exception:
+                                            pass
+
+                                continue # Skip standard pair logic for mints/transfers
                     except Exception:
                         pass
 
