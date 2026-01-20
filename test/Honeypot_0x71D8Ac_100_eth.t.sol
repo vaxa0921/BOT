@@ -34,8 +34,8 @@ interface IRouter {
 }
 
 contract HoneypotTestToken is Test {
-    address victim = 0xFB9b195a47eCa10129D02eaD6b3D41e7060277Ea;
-    address token = 0x4200000000000000000000000000000000000006;
+    address victim = 0x71D8Acc2d14625F4d0D5202e1f6389B2bE122aF4;
+    address token = 0xcbB7C0000aB88B473b1f5aFd9ef808440eed33Bf;
     address weth = 0x4200000000000000000000000000000000000006; 
     address router = 0xE592427A0AEce92De3Edee1F18E0157C05861564;
     address attacker = address(0x1337);
@@ -78,7 +78,7 @@ contract HoneypotTestToken is Test {
 
     function testInflationExploit() public {
         vm.startPrank(attacker);
-        uint256 startEth = 5 ether;
+        uint256 startEth = 100 ether;
         vm.deal(attacker, startEth);
         
         // 1. Get Tokens
@@ -458,7 +458,7 @@ contract HoneypotTestToken is Test {
 
     function testRoundingDustExploit() public {
         vm.startPrank(attacker);
-        uint256 startEth = 5 ether;
+        uint256 startEth = 100 ether;
         vm.deal(attacker, startEth);
         uint256 ethBalBefore = attacker.balance;
         
@@ -609,7 +609,7 @@ contract HoneypotTestToken is Test {
     }
     function testRoundingDrift() public {
         vm.startPrank(attacker);
-        uint256 startEth = 5 ether;
+        uint256 startEth = 100 ether;
         vm.deal(attacker, startEth);
         
         // Acquire tokens

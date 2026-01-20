@@ -13,11 +13,11 @@ interface IVault {
 }
 
 contract HoneypotTestETH is Test {
-    address victim = 0x3A32d2987B86a9C5552921289B8d4470075d360f;
+    address victim = 0x3725bD4D175283108156c3F15f86e1c51266155d;
     address attacker = address(0x1337);
     
     function setUp() public {
-        vm.createSelectFork("https://mainnet.base.org");
+        vm.createSelectFork("https://1rpc.io/base");
         vm.label(victim, "Victim");
         vm.label(attacker, "Attacker");
     }
@@ -128,7 +128,7 @@ contract HoneypotTestETH is Test {
         return;
     
         
-        uint256 amount = 0.001 ether; // Flash Loan Amount
+        uint256 amount = 5 ether; // Flash Loan Amount
         vm.deal(attacker, amount); 
         console.log("Flash Loan Mode: 20 ETH simulated");
         
