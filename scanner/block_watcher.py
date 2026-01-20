@@ -125,6 +125,47 @@ async def _watch_async() -> None:
             
             blocks = await asyncio.gather(*tasks, return_exceptions=True)
             
+            # --- Scan CONFIRMED blocks for contract deployments & interactions ---
+            for blk in blocks:
+                if isinstance(blk, Exception) or not blk:
+                    continue
+                if hasattr(blk, "transactions"):
+                    for tx in blk.transactions:
+                        # tx might be a dict or AttributeDict
+                        to_addr = tx.get("to") if isinstance(tx, dict) else getattr(tx, "to", None)
+                        input_data = tx.get("input") if isinstance(tx, dict) else getattr(tx, "input", None)
+                        val = tx.get("value") if isinstance(tx, dict) else getattr(tx, "value", 0)
+                        
+                        # 1. New Contract Deployment (Direct)
+                        if to_addr is None:
+                            tx_hash = tx.get("hash") if isinstance(tx, dict) else getattr(tx, "hash", None)
+                            if tx_hash:
+                                # Fetch receipt to get address
+                                try:
+                                    rec = await async_w3.eth.get_transaction_receipt(tx_hash)
+                                    if rec and rec.contractAddress and rec.contractAddress not in pending_seen:
+                                        pending_seen.add(rec.contractAddress)
+                                        enqueue(rec.contractAddress)
+                                        logger.info(f"[CONFIRMED] New contract detected: {rec.contractAddress}")
+                                except Exception:
+                                    pass
+
+                        # 2. Active Contract Interaction (Scan ALL active contracts)
+                        # If transaction has data, it's likely a contract call
+                        elif input_data and len(input_data) > 2: # '0x' + data
+                            # We rely on worker deduplication to avoid spamming
+                            enqueue(to_addr)
+                            # Do not log every interaction to avoid spam
+                        
+                        # 3. Whale Watch (Optional)
+                        elif val >= LARGE_TRANSFER_THRESHOLD_WEI:
+                             try:
+                                 enqueue_priority(to_addr)
+                                 logger.info(f"[WHALE] Large transfer detected to {to_addr} ({val/10**18:.2f} ETH)")
+                             except Exception:
+                                 pass
+            # ------------------------------------------------------
+
             # Poll logs for PairCreated/PoolCreated/Transfer(Mint) in the same range
             try:
                 logs = await async_w3.eth.get_logs({
@@ -232,32 +273,9 @@ async def _watch_async() -> None:
                     continue
 
                 # Process transactions
-                # Optimization: Check if 'to' is None (contract creation)
-                # This is much faster than getting receipt for every tx
-                
-                # Note: Internal transactions (factory deployments) are missed here.
-                # To catch factory deployments, we would need trace_block (expensive/unavailable on public RPCs)
-                # or filter logs for 'ContractCreated' events if emitted by factories.
-                
-                # For standard deployments:
-                for tx in block.transactions:
-                    if tx.to is None:
-                        # Fetch receipt to get address
-                        # We do this individually or could batch if needed
-                        try:
-                            receipt = await async_w3.eth.get_transaction_receipt(tx.hash)
-                            if receipt.contractAddress:
-                                enqueue(receipt.contractAddress)
-                                logger.info(f"Found new contract: {receipt.contractAddress}")
-                        except Exception as e:
-                            logger.error(f"Error fetching receipt: {e}")
-                    elif tx.value >= LARGE_TRANSFER_THRESHOLD_WEI:
-                        try:
-                            enqueue_priority(tx.to)
-                            logger.info(f"[WHALE] Large transfer detected to {tx.to} ({tx.value/10**18:.2f} ETH)")
-                        except Exception:
-                            pass
-
+                # Optimization: All transactions are now handled in the loop above.
+                # Removing redundant loop.
+            
             last_block = end_block
             backoff = 0.5
             
@@ -366,21 +384,35 @@ def _watch_sync(w3: Web3) -> None:
                 block = w3.eth.get_block(block_num, full_transactions=True)
 
                 for tx in block.transactions:
-                    # контракт створюється ТІЛЬКИ якщо to == None
-                    if tx.to is not None:
-                        if tx.value >= LARGE_TRANSFER_THRESHOLD_WEI:
-                            try:
-                                enqueue_priority(tx.to)
-                                logger.info(f"[WHALE] Large transfer detected to {tx.to} ({tx.value/10**18:.2f} ETH)")
-                            except Exception:
-                                pass
+                    to_addr = tx.get("to") if isinstance(tx, dict) else getattr(tx, "to", None)
+                    input_data = tx.get("input") if isinstance(tx, dict) else getattr(tx, "input", None)
+                    val = tx.get("value") if isinstance(tx, dict) else getattr(tx, "value", 0)
+
+                    # 1. New Contract Deployment
+                    if to_addr is None:
+                        try:
+                            tx_hash = tx.get("hash") if isinstance(tx, dict) else getattr(tx, "hash", None)
+                            if tx_hash:
+                                receipt = w3.eth.get_transaction_receipt(tx_hash)
+                                if receipt.contractAddress:
+                                    enqueue(receipt.contractAddress)
+                                    logger.info(f"[CONFIRMED] New contract detected: {receipt.contractAddress}")
+                        except Exception:
+                            pass
                         continue
-
-                    receipt = w3.eth.get_transaction_receipt(tx.hash)
-                    addr: Optional[str] = receipt.contractAddress
-
-                    if addr:
-                        enqueue(addr)
+                    
+                    # 2. Active Contract Interaction (Scan ALL active contracts)
+                    if input_data and len(input_data) > 2: # '0x' + data
+                        # Deduplication is handled in worker
+                        enqueue(to_addr)
+                    
+                    # 3. Whale Watch
+                    if val >= LARGE_TRANSFER_THRESHOLD_WEI:
+                        try:
+                            enqueue_priority(to_addr)
+                            logger.info(f"[WHALE] Large transfer detected to {to_addr} ({val/10**18:.2f} ETH)")
+                        except Exception:
+                            pass
 
             last_block = current
 

