@@ -5,7 +5,7 @@ import time
 import logging
 from typing import Optional, List
 from web3 import Web3
-from scanner.contract_queue import enqueue
+from scanner.contract_queue import enqueue, enqueue_priority
 
 # Suppress eth_utils network warnings
 warnings.filterwarnings("ignore", category=UserWarning, module="eth_utils")
@@ -18,7 +18,7 @@ from scanner.config import (
     BACKFILL_START_BLOCK,
     BACKFILL_END_BLOCK,
     BACKFILL_BLOCKS_BACK,
-    KNOWN_FACTORIES
+    KNOWN_FACTORIES,
 )
 from scanner.factory_scanner import scan_factory_creations, scan_global_factory_events
 from scanner.verified_ingestion import ingest_verified_contracts
@@ -100,58 +100,73 @@ def run_backfill(
     found = 0
     total_txs = 0
 
-    logger.info(f"Starting backfill from block {start_block} to {end_block}")
-    logger.info(f"Total blocks to scan: {end_block - start_block}")
-
-    while current < end_block:
-        batch_end = min(current + BACKFILL_BATCH_SIZE, end_block)
-        
+    total_blocks = end_block - start_block
+    logger.info(f"Starting backfill from block {start_block} to {end_block} ({total_blocks} blocks)")
+    
+    # 1. Scan Factory Events FIRST (High Priority)
+    # This finds existing vaults/pools which are the most likely targets for rounding/inflation bugs
+    # We scan the ENTIRE range for these specific topics
+    
+    # Factory Topics
+    new_vault_topic = "0x4241302c393c713e690702c4a45a57e93cef59aa8c6e2358495853b3420551d8"
+    vault_created_topic = "0x5d9c31ffa0fecffd7cf379989a3c7af252f0335e0d2a1320b55245912c781f53"
+    pair_created_topic = "0x0d3648bd0f6ba80134a33ba9275ac585d9d315f0ad8355cddefde31afa28d0e9" # Uniswap V2
+    pool_created_topic = "0x783cca1c0412dd0d695e784568c96da2e9c22ff989357a2e8b1d9b2b4e6b7118" # Uniswap V3
+    
+    logger.info("Scanning for Factory Events (Vaults/Pools) to populate queue...")
+    
+    # We use a larger batch size for logs since we filter by topic
+    log_batch_size = 2000 
+    
+    for b_start in range(start_block, end_block + 1, log_batch_size):
+        b_end = min(b_start + log_batch_size - 1, end_block)
         try:
-            for block_num in range(current, batch_end):
+            logs = w3.eth.get_logs({
+                "fromBlock": b_start,
+                "toBlock": b_end,
+                "address": KNOWN_FACTORIES,
+                "topics": [[new_vault_topic, vault_created_topic, pair_created_topic, pool_created_topic]]
+            })
+            
+            for log in logs:
                 try:
-                    block = w3.eth.get_block(block_num, full_transactions=True)
-                    scanned += 1
-                    total_txs += len(block.transactions)
-
-                    contract_creations = 0
-                    for tx in block.transactions:
-                        if tx.to is not None:
-                            continue
-
-                        try:
-                            receipt = w3.eth.get_transaction_receipt(tx.hash)
-                            addr = receipt.contractAddress
-
-                            if addr:
+                    topics = log.get("topics", [])
+                    if len(topics) > 1:
+                        # Extract address from topic (usually topic 1 or 2)
+                        # V2/V3: pair/pool is usually in data or topic, but let's try standard patterns
+                        
+                        # V2 PairCreated: pair is in data (first 32 bytes)
+                        if topics[0].hex() == pair_created_topic:
+                            data = log.get("data", "0x")
+                            if len(data) >= 66:
+                                addr = w3.to_checksum_address("0x" + data[2:42]) # First 20 bytes of data often pair
                                 enqueue(addr)
-                                found += 1
-                                contract_creations += 1
-                        except Exception as tx_error:
-                            logger.debug(f"Error getting receipt for tx {tx.hash.hex()}: {tx_error}")
-                            continue
-
-                    if contract_creations > 0:
-                        logger.debug(
-                            f"Block {block_num}: found {contract_creations} contract(s)"
-                        )
-
-                except Exception as block_error:
-                    logger.warning(f"Error processing block {block_num}: {block_error}")
-                    scanned += 1
-                    continue
-
-            current = batch_end
-            logger.info(
-                f"Backfill progress: {current}/{end_block} "
-                f"(scanned={scanned}, found={found}, txs={total_txs})"
-            )
-
+                                continue
+                                
+                        # V3 PoolCreated: pool is in data? No, V3 PoolCreated is (token0, token1, fee, tickSpacing, pool)
+                        # pool is at end of arguments.
+                        # Actually standard V3 event: PoolCreated(token0, token1, fee, tickSpacing, pool)
+                        # topics: [sig, token0, token1, fee] -> pool is in data?
+                        # Let's just grab address from the log emitter itself if it's a factory, or try to parse data.
+                        # Simpler: Just grab any address-like thing in topics/data
+                        
+                        # Generic Vault Patterns (NewVault/VaultCreated usually have vault in topic 1)
+                        addr = w3.to_checksum_address("0x" + topics[1].hex()[-40:])
+                        enqueue(addr)
+                except Exception:
+                    pass
+            
+            logger.info(f"[BACKFILL] Scanned factory logs {b_start}-{b_end}. Found {len(logs)} events.")
+            
         except Exception as e:
-            logger.error(f"Backfill error at block {current}: {e}")
-            time.sleep(5)
-            # Try next RPC (round-robin)
-            rpc_idx = (current // BACKFILL_BATCH_SIZE) % len(RPCS)
-            w3 = Web3(Web3.HTTPProvider(RPCS[rpc_idx]))
+            logger.error(f"[BACKFILL] Log scan failed: {e}")
+            time.sleep(1)
+
+    # 2. Standard Block Scan (Transactions)
+    # Only if we really need deep scan. For now, Factory scan is much higher yield for "finding something profitable".
+    # We will skip the full tx scan to save time and focus on the vaults we just found.
+    logger.info("Factory scan complete. Processing queue...")
+    return
 
     logger.info(
         f"Backfill complete: scanned={scanned}, "

@@ -127,6 +127,7 @@ while True:
 
                 # Deduplication by bytecode hash
                 if is_duplicate(code):
+                    print(f"[DECISION] {addr} skipped (duplicate bytecode)", flush=True)
                     mark(addr, "DONE")
                     continue
 

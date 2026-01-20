@@ -51,8 +51,8 @@ BLOCK_LAG: int = int(os.getenv("BLOCK_LAG", "0"))
 BACKFILL_BATCH_SIZE: int = 100  # blocks per batch
 BACKFILL_START_BLOCK: int = 0  # 0 = 100 blocks back from current
 BACKFILL_END_BLOCK: int = 0  # 0 = current block
-BACKFILL_BLOCKS_BACK: int = 43200  # 24 hours (assuming 2s block time)
-REALTIME_ONLY: bool = os.getenv("REALTIME_ONLY", "0").lower() in ("1", "true", "yes")
+BACKFILL_BLOCKS_BACK: int = 500000  # ~12 days of backfill to find something!
+REALTIME_ONLY: bool = False # FORCE BACKFILL
 FOT_ENABLE: bool = os.getenv("FOT_ENABLE", "1").lower() in ("1", "true", "yes")
 FOT_SIM_AMOUNT_WEI: int = int(100 * 10**18)
 FOT_SCREEN_AMOUNT_WEI: int = int(1000 * 10**18)
@@ -78,7 +78,7 @@ KNOWN_FACTORIES: List[str] = [
     "0x5C69bEe701ef814a2B6a3EDD4B1652CB9cc5aA6f",  # Uniswap V2 Factory / AlienBase V2
     "0x1F98431c8aD98523631AE4a59f267346ea31F984",  # Uniswap V3 Factory
     "0x1111111254fb6c44bAC0beD2854e76F90643097d",  # 1inch Aggregation Router
-    "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",  # USDC Proxy (Example)
+    "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",  # USDC Proxy (Example)
     "0x420DD381b31aEf6683db6B902084cB0FFECe40Da",  # Aerodrome Pool Factory
 ]
 UNISWAP_V3_FACTORY: str = "0x1F98431c8aD98523631AE4a59f267346ea31F984"

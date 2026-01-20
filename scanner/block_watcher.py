@@ -157,13 +157,13 @@ async def _watch_async() -> None:
                             enqueue(to_addr)
                             # Do not log every interaction to avoid spam
                         
-                        # 3. Whale Watch (Optional)
-                        elif val >= LARGE_TRANSFER_THRESHOLD_WEI:
-                             try:
-                                 enqueue_priority(to_addr)
-                                 logger.info(f"[WHALE] Large transfer detected to {to_addr} ({val/10**18:.2f} ETH)")
-                             except Exception:
-                                 pass
+                        # 3. Whale Watch (Optional) - DISABLED to reduce noise
+                        # elif val >= LARGE_TRANSFER_THRESHOLD_WEI:
+                        #      try:
+                        #          enqueue_priority(to_addr)
+                        #          # logger.info(f"[WHALE] Large transfer detected to {to_addr} ({val/10**18:.2f} ETH)")
+                        #      except Exception:
+                        #          pass
             # ------------------------------------------------------
 
             # Poll logs for PairCreated/PoolCreated/Transfer(Mint) in the same range
@@ -318,6 +318,8 @@ def _watch_sync(w3: Web3) -> None:
             return
 
     backoff = 0.5
+    last_heartbeat = time.time()
+    blocks_scanned_count = 0
     
     # Topics
     new_vault_topic = "0x4241302c393c713e690702c4a45a57e93cef59aa8c6e2358495853b3420551d8"
@@ -330,8 +332,18 @@ def _watch_sync(w3: Web3) -> None:
             current: int = w3.eth.block_number
 
             if current <= last_block + BLOCK_LAG:
+                # Heartbeat check
+                if time.time() - last_heartbeat > 60:
+                    logger.info(f"[HEARTBEAT] Still watching... Scanned {blocks_scanned_count} blocks in last minute. Current block: {current}")
+                    last_heartbeat = time.time()
+                    blocks_scanned_count = 0
+                
                 time.sleep(POLL_INTERVAL)
                 continue
+
+            # Update count
+            blocks_scanned_count += (current - BLOCK_LAG - last_block)
+
 
             # Check logs for Factory events (Sniper Mode)
             try:
@@ -406,13 +418,13 @@ def _watch_sync(w3: Web3) -> None:
                         # Deduplication is handled in worker
                         enqueue(to_addr)
                     
-                    # 3. Whale Watch
-                    if val >= LARGE_TRANSFER_THRESHOLD_WEI:
-                        try:
-                            enqueue_priority(to_addr)
-                            logger.info(f"[WHALE] Large transfer detected to {to_addr} ({val/10**18:.2f} ETH)")
-                        except Exception:
-                            pass
+                    # 3. Whale Watch (DISABLED)
+                    # if val >= LARGE_TRANSFER_THRESHOLD_WEI:
+                    #     try:
+                    #         enqueue_priority(to_addr)
+                    #         # logger.info(f"[WHALE] Large transfer detected to {to_addr} ({val/10**18:.2f} ETH)")
+                    #     except Exception:
+                    #         pass
 
             last_block = current
 

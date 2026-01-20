@@ -13,7 +13,7 @@ interface IVault {
 }
 
 contract HoneypotTestETH is Test {
-    address victim = 0x837B57a93d4C0e5Be3d4C551730Fd7F3b6F7722F;
+    address victim = 0xd13A8d3207A131B2385156779417e7D35B24908c;
     address attacker = address(0x1337);
     
     function setUp() public {
@@ -128,7 +128,7 @@ contract HoneypotTestETH is Test {
         return;
     
         
-        uint256 amount = 10 ether; // Flash Loan Amount
+        uint256 amount = 20 ether; // Flash Loan Amount
         vm.deal(attacker, amount); 
         console.log("Flash Loan Mode: 20 ETH simulated");
         
